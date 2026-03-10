@@ -21,12 +21,33 @@ cp -a "$CROSS_PREFIX/lib/python3.13/" "$STAGING/python/lib/python3.13/"
 REMOVE_DIRS=(
     test tests tkinter idlelib turtledemo ensurepip
     lib2to3 distutils config-3.13-aarch64-linux-android
-    lib-dynload
 )
 for dir in "${REMOVE_DIRS[@]}"; do
     rm -rf "$STAGING/python/lib/python3.13/$dir"
     echo "  Removed $dir"
 done
+
+# Remove unnecessary C extensions from lib-dynload (keep essential ones)
+DYNLOAD="$STAGING/python/lib/python3.13/lib-dynload"
+REMOVE_SO=(
+    _ctypes_test _testbuffer _testcapi _testclinic_limited _testclinic
+    _testexternalinspection _testimportmultiple _testinternalcapi
+    _testlimitedcapi _testmultiphase _testsinglephase _xxtestfuzz
+    xxlimited_35 xxlimited xxsubtype
+    _sqlite3 _ssl _lsprof _interpchannels _interpqueues _interpreters
+    _codecs_cn _codecs_hk _codecs_iso2022 _codecs_jp _codecs_kr _codecs_tw
+    _multibytecodec termios syslog resource
+)
+for mod in "${REMOVE_SO[@]}"; do
+    rm -f "$DYNLOAD/${mod}".cpython-*.so
+done
+echo "  Trimmed lib-dynload: removed ${#REMOVE_SO[@]} unnecessary extensions"
+
+# Strip debug symbols from remaining .so files
+for so in "$DYNLOAD"/*.so; do
+    "$NDK_STRIP" --strip-debug "$so" 2>/dev/null || true
+done
+echo "  Stripped lib-dynload .so files"
 
 find "$STAGING" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 find "$STAGING" -name "*.pyc" -delete 2>/dev/null || true
@@ -48,6 +69,11 @@ find "$SITE_PACKAGES" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null 
 find "$SITE_PACKAGES" -name "*.pyc" -delete 2>/dev/null || true
 rm -rf "$SITE_PACKAGES"/*.dist-info
 rm -rf "$SITE_PACKAGES/sympy/testing" "$SITE_PACKAGES/sympy/benchmarks"
+
+sed -i '' 's/^from importlib.metadata import version$/__version__ = "1.3.0"/' "$SITE_PACKAGES/mpmath/__init__.py"
+sed -i '' '/^__version__ = version(__name__)$/d' "$SITE_PACKAGES/mpmath/__init__.py"
+sed -i '' '/^del version$/d' "$SITE_PACKAGES/mpmath/__init__.py"
+echo "  Patched mpmath __init__.py to hardcode version"
 
 SYMPY_SIZE=$(du -sh "$SITE_PACKAGES/sympy/" 2>/dev/null | cut -f1)
 MPMATH_SIZE=$(du -sh "$SITE_PACKAGES/mpmath/" 2>/dev/null | cut -f1)

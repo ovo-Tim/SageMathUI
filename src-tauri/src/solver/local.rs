@@ -20,6 +20,7 @@ pub struct LocalSageSolver {
     process: Arc<Mutex<Option<SageProcess>>>,
     bridge_script: PathBuf,
     sage_path: String,
+    backend_info: Arc<Mutex<Option<(String, Option<String>)>>>,
 }
 
 struct SageProcess {
@@ -34,6 +35,7 @@ impl LocalSageSolver {
             process: Arc::new(Mutex::new(None)),
             bridge_script: Self::resolve_bridge_script_path(),
             sage_path: Self::resolve_sage_path(sage_path),
+            backend_info: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -176,6 +178,17 @@ impl LocalSageSolver {
             ));
         }
 
+        let backend = ready_json
+            .get("backend")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string();
+        let version = ready_json
+            .get("version")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        *self.backend_info.lock().await = Some((backend, version));
+
         *guard = Some(SageProcess {
             child,
             stdin,
@@ -317,14 +330,19 @@ impl Solver for LocalSageSolver {
 
     fn status(&self) -> Pin<Box<dyn Future<Output = SolverStatus> + Send + '_>> {
         Box::pin(async move {
-            // Auto-start the solver if it's not running yet
             if !self.is_running().await {
                 let _ = self.start().await;
             }
+            let connected = self.is_running().await;
+            let info = self.backend_info.lock().await;
+            let (backend_name, version) = match info.as_ref() {
+                Some((b, v)) => (b.clone(), v.clone()),
+                None => ("unknown".to_string(), None),
+            };
             SolverStatus {
-                connected: self.is_running().await,
-                backend_name: "SageMath (local)".to_string(),
-                version: None,
+                connected,
+                backend_name,
+                version,
             }
         })
     }

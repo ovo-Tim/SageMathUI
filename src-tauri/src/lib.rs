@@ -100,7 +100,10 @@ pub fn run() {
                     .expect("Failed to get Android data directory");
 
                 let config_path = data_dir.join(".solver_config.json");
+                let config_path_alt = data_dir.join("files/.solver_config.json");
+
                 let config_str = std::fs::read_to_string(&config_path)
+                    .or_else(|_| std::fs::read_to_string(&config_path_alt))
                     .unwrap_or_else(|_| {
                         let fallback_dir = std::path::PathBuf::from("/data/data/com.sagemath.ui/files");
                         format!(

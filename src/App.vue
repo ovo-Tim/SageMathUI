@@ -13,9 +13,13 @@ const showStatusPopup = ref(false);
 function handleSolve() {
   if (solver.latex.trim()) {
     const operation = solver.latex.includes('=') ? 'solve' : 'simplify';
-    console.log('[DEBUG] LaTeX:', solver.latex, 'Operation:', operation);
     solver.solveMath(operation);
   }
+}
+
+function formatBackendName(name: string): string {
+  const map: Record<string, string> = { sage: 'SageMath', sympy: 'SymPy' };
+  return map[name] || name;
 }
 
 async function handleStatusCheck() {
@@ -48,7 +52,8 @@ onMounted(async () => {
         <span
           class="status-dot"
           :class="{
-            'status-connected': solver.solverStatus?.connected,
+            'status-sage': solver.solverStatus?.connected && solver.solverStatus?.backend_name === 'sage',
+            'status-sympy': solver.solverStatus?.connected && solver.solverStatus?.backend_name === 'sympy',
             'status-disconnected': solver.solverStatus && !solver.solverStatus.connected,
             'status-unknown': !solver.solverStatus,
             'status-checking': statusChecking,
@@ -63,7 +68,7 @@ onMounted(async () => {
               <span class="status-popup-icon" :class="solver.solverStatus.connected ? 'ok' : 'err'">
                 {{ solver.solverStatus.connected ? '✓' : '✗' }}
               </span>
-              <span class="status-popup-label">{{ solver.solverStatus.backend_name }}</span>
+              <span class="status-popup-label">{{ formatBackendName(solver.solverStatus.backend_name) }}</span>
               <span v-if="solver.solverStatus.version" class="status-popup-version">
                 v{{ solver.solverStatus.version }}
               </span>
@@ -187,9 +192,14 @@ onMounted(async () => {
   transition: background-color 0.3s ease, box-shadow 0.3s ease;
 }
 
-.status-dot.status-connected {
+.status-dot.status-sage {
   background-color: #4ade80;
   box-shadow: 0 0 6px rgba(74, 222, 128, 0.6);
+}
+
+.status-dot.status-sympy {
+  background-color: #fb923c;
+  box-shadow: 0 0 6px rgba(251, 146, 60, 0.6);
 }
 
 .status-dot.status-disconnected {

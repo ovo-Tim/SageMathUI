@@ -23,6 +23,7 @@ pub struct AndroidSageSolver {
     python_home: PathBuf,
     bridge_script: PathBuf,
     native_lib_dir: PathBuf,
+    backend_info: Arc<Mutex<Option<(String, Option<String>)>>>,
 }
 
 impl AndroidSageSolver {
@@ -38,6 +39,7 @@ impl AndroidSageSolver {
             python_home,
             bridge_script,
             native_lib_dir,
+            backend_info: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -48,17 +50,11 @@ impl AndroidSageSolver {
         }
 
         if !self.python_binary.exists() {
-            return Err(format!(
-                "Python binary not found at {}. Run asset extraction first.",
-                self.python_binary.display()
-            ));
+            return Err(format!("Python binary not found at {}", self.python_binary.display()));
         }
 
         if !self.bridge_script.exists() {
-            return Err(format!(
-                "Bridge script not found at {}",
-                self.bridge_script.display()
-            ));
+            return Err(format!("Bridge script not found at {}", self.bridge_script.display()));
         }
 
         let stdlib = self.python_home.join("lib/python3.13");
@@ -78,6 +74,19 @@ impl AndroidSageSolver {
             .spawn()
             .map_err(|e| format!("Failed to start Python: {}", e))?;
 
+        let stderr = child.stderr.take();
+        if let Some(stderr) = stderr {
+            tokio::spawn(async move {
+                let mut stderr_reader = BufReader::new(stderr);
+                let mut line = String::new();
+                while let Ok(n) = stderr_reader.read_line(&mut line).await {
+                    if n == 0 { break; }
+                    eprint!("[python-stderr] {}", line);
+                    line.clear();
+                }
+            });
+        }
+
         let stdin = child.stdin.take().ok_or("Failed to capture stdin")?;
         let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
         let reader = BufReader::new(stdout);
@@ -93,6 +102,9 @@ impl AndroidSageSolver {
             Ok(Ok(n)) if n > 0 => {
                 if let Ok(ready) = serde_json::from_str::<serde_json::Value>(&ready_line) {
                     if ready.get("type").and_then(|t| t.as_str()) == Some("ready") {
+                        let backend = ready.get("backend").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+                        let version = ready.get("version").and_then(|v| v.as_str()).map(|s| s.to_string());
+                        *self.backend_info.lock().await = Some((backend, version));
                         *proc_guard = Some(proc);
                         return Ok(());
                     }
@@ -101,7 +113,7 @@ impl AndroidSageSolver {
             }
             Ok(Ok(_)) => Err("Python process closed stdout immediately".to_string()),
             Ok(Err(e)) => Err(format!("IO error reading ready: {}", e)),
-            Err(_) => Err("Timeout waiting for Python ready signal (15s)".to_string()),
+            Err(_) => Err("Timeout waiting for Python ready signal (15s)".to_string())
         }
     }
 
@@ -210,11 +222,23 @@ impl Solver for AndroidSageSolver {
 
     fn status(&self) -> Pin<Box<dyn Future<Output = SolverStatus> + Send + '_>> {
         Box::pin(async move {
+            {
+                let proc = self.process.lock().await;
+                if proc.is_none() {
+                    drop(proc);
+                    if let Err(_) = self.ensure_started().await {}
+                }
+            }
             let proc = self.process.lock().await;
+            let info = self.backend_info.lock().await;
+            let (backend_name, version) = match info.as_ref() {
+                Some((b, v)) => (b.clone(), v.clone()),
+                None => ("unknown".to_string(), None),
+            };
             SolverStatus {
                 connected: proc.is_some(),
-                backend_name: "SageMath (Android/SymPy)".to_string(),
-                version: Some("0.1.0".to_string()),
+                backend_name,
+                version,
             }
         })
     }
