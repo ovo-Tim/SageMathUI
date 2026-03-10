@@ -1,26 +1,50 @@
 :root {
   --color-accent-red: #A30021;
+  --color-accent-red-hover: #8a001c;
+  --color-accent-red-light: rgba(163, 0, 33, 0.08);
   --color-header-bg: #1a1a2e;
   --color-keyboard-bg: #F0F0F5;
   --color-result-bar: #A30021;
   --color-white: #FFFFFF;
+  --color-surface: #FAFAFA;
   --color-text-primary: #1a1a1a;
   --color-text-secondary: #666666;
+  --color-text-hint: #999999;
   --color-divider: #CCCCCC;
+  --color-divider-light: #E8E8E8;
+
+  --font-ui: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-math: Georgia, 'Times New Roman', Times, serif;
+
+  --radius-pill: 24px;
+  --radius-card: 12px;
+  --radius-button: 8px;
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.1);
+  --shadow-accent: 0 4px 12px rgba(163, 0, 33, 0.2);
+
+  --transition-fast: 0.15s cubic-bezier(0.25, 0.8, 0.25, 1);
+  --transition-normal: 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+  --transition-slow: 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
 }
 
 html, body {
   width: 100%;
   height: 100vh;
   overflow: hidden;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background-color: #000; /* Outer background to see centering */
+  font-family: var(--font-ui);
+  background-color: #000;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 #app {
@@ -36,5 +60,35 @@ html, body {
 }
 
 .serif-font {
-  font-family: 'Times New Roman', Times, serif;
+  font-family: var(--font-math);
+}
+
+button {
+  font-family: var(--font-ui);
+  transition: all var(--transition-normal);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--color-accent-red);
+  outline-offset: 2px;
+}
+
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-divider);
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-secondary);
 }

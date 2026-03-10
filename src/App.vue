@@ -3,6 +3,15 @@ import MathInput from './components/MathInput.vue';
 import MathKeyboard from './components/MathKeyboard.vue';
 import ResultDisplay from './components/ResultDisplay.vue';
 import StepByStep from './components/StepByStep.vue';
+import { useSolverStore } from './stores/solver';
+
+const solver = useSolverStore();
+
+function handleSolve() {
+  if (solver.latex.trim()) {
+    solver.solveMath('solve');
+  }
+}
 </script>
 
 <template>
@@ -27,28 +36,34 @@ import StepByStep from './components/StepByStep.vue';
     <!-- Main Content -->
     <main class="app-content">
       <div class="input-zone serif-font">
-        <MathInput />
-        <!-- Placeholder for math input -->
-        <div class="math-expression">2x + 5 = 11</div>
+        <MathInput v-model="solver.latex" />
+        <button class="solve-button" @click="handleSolve" :disabled="!solver.latex.trim() || solver.loading">
+          <span v-if="solver.loading" class="spinner"></span>
+          <template v-else>
+            <span class="solve-text">Solve</span>
+            <svg class="solve-arrow" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+              <polyline points="12 5 19 12 12 19"></polyline>
+            </svg>
+          </template>
+        </button>
       </div>
       
       <div class="divider"></div>
       
       <div class="result-zone">
-        <div class="result-content">
-          <ResultDisplay />
-          <!-- Placeholder for result -->
-          <div class="math-result serif-font">x = 3</div>
-        </div>
-        
-        <button class="show-solution-btn">
-          <span>Show Solution</span>
-          <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="9 18 15 12 9 6"></polyline>
-          </svg>
-        </button>
+        <ResultDisplay
+          :result-latex="solver.resultLatex"
+          :loading="solver.loading"
+          :error="solver.error"
+          @show-steps="solver.toggleSteps"
+        />
 
-        <StepByStep />
+        <StepByStep
+          :steps="solver.steps"
+          :visible="solver.showSteps"
+          @close="solver.toggleSteps"
+        />
       </div>
     </main>
 
@@ -75,25 +90,43 @@ import StepByStep from './components/StepByStep.vue';
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
+  padding: 0 12px;
   flex-shrink: 0;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  z-index: 10;
 }
 
 .icon-button {
   background: none;
   border: none;
-  color: var(--color-white);
+  color: rgba(255, 255, 255, 0.85);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 8px;
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 50%;
+  transition: all var(--transition-fast);
+}
+
+.icon-button:hover {
+  color: var(--color-white);
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.icon-button:active {
+  transform: scale(0.92);
+  background-color: rgba(255, 255, 255, 0.15);
 }
 
 .header-title {
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 600;
   margin: 0;
+  font-family: var(--font-ui);
+  letter-spacing: 0.01em;
 }
 
 .app-content {
@@ -109,19 +142,71 @@ import StepByStep from './components/StepByStep.vue';
   flex-direction: column;
   align-items: flex-end;
   min-height: 80px;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
+  gap: 16px;
+  width: 100%;
 }
 
-.math-expression {
-  font-size: 28px;
-  color: var(--color-text-primary);
-  width: 100%;
-  text-align: right;
+.solve-button {
+  background: var(--color-accent-red);
+  color: var(--color-white);
+  border: none;
+  border-radius: var(--radius-pill);
+  padding: 0 28px;
+  min-width: 110px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  box-shadow: var(--shadow-accent);
+  transition: all var(--transition-normal);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.solve-button:hover:not(:disabled) {
+  background: var(--color-accent-red-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(163, 0, 33, 0.3);
+}
+
+.solve-button:active:not(:disabled) {
+  transform: scale(0.97) translateY(1px);
+  box-shadow: 0 2px 6px rgba(163, 0, 33, 0.2);
+}
+
+.solve-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.solve-text {
+  line-height: 1;
+}
+
+.spinner {
+  width: 18px;
+  height: 18px;
+  border: 2.5px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: #fff;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 .divider {
+  border: none;
   border-top: 1px dashed var(--color-divider);
-  margin: 0 -20px 20px -20px; /* Bleed to edges */
+  margin: 0 -20px 16px -20px;
 }
 
 .result-zone {
@@ -129,41 +214,11 @@ import StepByStep from './components/StepByStep.vue';
   flex-direction: column;
 }
 
-.result-content {
-  display: flex;
-  flex-direction: column;
-  border-left: 4px solid var(--color-result-bar);
-  padding-left: 16px;
-  margin-bottom: 24px;
-}
-
-.math-result {
-  font-size: 24px;
-  font-weight: bold;
-  color: var(--color-text-primary);
-  text-align: left;
-}
-
-.show-solution-btn {
-  align-self: flex-start;
-  background-color: var(--color-accent-red);
-  color: var(--color-white);
-  border: none;
-  border-radius: 999px;
-  padding: 10px 20px;
-  font-size: 14px;
-  font-weight: 500;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  margin-left: 20px; /* align with result text visually */
-}
-
 .app-keyboard {
   height: 280px;
   background-color: var(--color-keyboard-bg);
   flex-shrink: 0;
-  box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.08);
+  z-index: 10;
 }
 </style>
