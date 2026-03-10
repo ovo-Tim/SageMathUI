@@ -1,21 +1,21 @@
 mod solver;
 
-use solver::{OperationType, SolverRequest, SolverResponse, SubprocessSolver, Solver};
+use solver::{LocalSageSolver, OperationType, Solver, SolverRequest, SolverResponse, SolverStatus};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-// Global solver instance (will be initialized at app startup)
-lazy_static::lazy_static! {
-    static ref SOLVER: Arc<Mutex<Option<Arc<dyn Solver>>>> = Arc::new(Mutex::new(None));
+/// Managed state containing the solver instance
+pub struct SolverState {
+    solver: Arc<Mutex<LocalSageSolver>>,
 }
 
-/// Initialize the math solver with paths to Python and bridge script
-#[tauri::command]
-async fn initialize_solver(python_path: String, bridge_script: String) -> Result<String, String> {
-    let solver = Arc::new(SubprocessSolver::new(python_path, bridge_script));
-    let mut global_solver = SOLVER.lock().await;
-    *global_solver = Some(solver);
-    Ok("Solver initialized successfully".to_string())
+impl SolverState {
+    /// Create a new SolverState with auto-detected sage path
+    pub fn new() -> Self {
+        Self {
+            solver: Arc::new(Mutex::new(LocalSageSolver::new(None))),
+        }
+    }
 }
 
 /// Solve a math expression
@@ -24,6 +24,7 @@ async fn solve_math(
     latex: String,
     operation: String,
     variable: Option<String>,
+    state: tauri::State<'_, SolverState>,
 ) -> Result<SolverResponse, String> {
     let op_type = match operation.to_lowercase().as_str() {
         "solve" => OperationType::Solve,
@@ -43,36 +44,23 @@ async fn solve_math(
         variable,
     };
 
-    let global_solver = SOLVER.lock().await;
-    match global_solver.as_ref() {
-        Some(solver) => solver.solve(request).await,
-        None => Err("Solver not initialized. Call initialize_solver first.".to_string()),
-    }
+    let solver = state.solver.lock().await;
+    solver.solve(request).await
 }
 
 /// Get solver status
 #[tauri::command]
-async fn get_solver_status() -> Result<String, String> {
-    let global_solver = SOLVER.lock().await;
-    match global_solver.as_ref() {
-        Some(solver) => {
-            let status = solver.status().await;
-            Ok(format!(
-                "Backend: {}, Connected: {}, Version: {:?}",
-                status.backend_name, status.connected, status.version
-            ))
-        }
-        None => Ok("Solver not initialized".to_string()),
-    }
+async fn get_solver_status(state: tauri::State<'_, SolverState>) -> Result<SolverStatus, String> {
+    let solver = state.solver.lock().await;
+    let status = solver.status().await;
+    Ok(status)
 }
 
 /// Shutdown the solver
 #[tauri::command]
-async fn shutdown_solver() -> Result<String, String> {
-    let global_solver = SOLVER.lock().await;
-    if let Some(solver) = global_solver.as_ref() {
-        solver.shutdown().await;
-    }
+async fn shutdown_solver(state: tauri::State<'_, SolverState>) -> Result<String, String> {
+    let solver = state.solver.lock().await;
+    solver.shutdown().await;
     Ok("Solver shut down".to_string())
 }
 
@@ -80,19 +68,15 @@ async fn shutdown_solver() -> Result<String, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .manage(SolverState::new())
+        .setup(|_app| {
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
-            greet,
-            initialize_solver,
             solve_math,
             get_solver_status,
             shutdown_solver
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-}
-
-/// Simple greeting function for compatibility
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
 }
