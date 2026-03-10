@@ -9,7 +9,8 @@ const solver = useSolverStore();
 
 function handleSolve() {
   if (solver.latex.trim()) {
-    solver.solveMath('solve');
+    const operation = solver.latex.includes('=') ? 'solve' : 'simplify';
+    solver.solveMath(operation);
   }
 }
 </script>
@@ -37,6 +38,10 @@ function handleSolve() {
     <main class="app-content">
       <div class="input-zone serif-font">
         <MathInput v-model="solver.latex" />
+      </div>
+
+      <div class="divider-wrapper">
+        <div class="divider"></div>
         <button class="solve-button" @click="handleSolve" :disabled="!solver.latex.trim() || solver.loading">
           <span v-if="solver.loading" class="spinner"></span>
           <template v-else>
@@ -48,8 +53,6 @@ function handleSolve() {
           </template>
         </button>
       </div>
-      
-      <div class="divider"></div>
       
       <div class="result-zone">
         <ResultDisplay
@@ -140,14 +143,22 @@ function handleSolve() {
 .input-zone {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
   min-height: 80px;
   margin-bottom: 16px;
-  gap: 16px;
   width: 100%;
 }
 
+.divider-wrapper {
+  position: relative;
+  margin-bottom: 24px;
+}
+
 .solve-button {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  z-index: 2;
   background: var(--color-accent-red);
   color: var(--color-white);
   border: none;
@@ -206,7 +217,7 @@ function handleSolve() {
 .divider {
   border: none;
   border-top: 1px dashed var(--color-divider);
-  margin: 0 -20px 16px -20px;
+  margin: 0 -20px;
 }
 
 .result-zone {

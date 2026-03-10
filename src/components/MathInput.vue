@@ -137,9 +137,7 @@ function handleFocus() {
 }
 
 function handleBlur() {
-  if (window.mathVirtualKeyboard) {
-    window.mathVirtualKeyboard.hide();
-  }
+  // Keep keyboard visible — calculator always shows its keypad
 }
 
 function clearField() {

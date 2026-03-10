@@ -5,6 +5,7 @@ onMounted(() => {
   const container = document.getElementById('keyboard-container');
   if (container && window.mathVirtualKeyboard) {
     window.mathVirtualKeyboard.container = container;
+    window.mathVirtualKeyboard.show();
   }
 });
 </script>
@@ -22,51 +23,33 @@ onMounted(() => {
   width: 100%;
   background-color: var(--color-keyboard-bg);
   
+  /* MathLive keyboard theme — CSS custom properties cascade into shadow DOM */
   --keyboard-background: var(--color-keyboard-bg);
+
+  /* Toolbar (tab bar) */
+  --keyboard-toolbar-text: var(--color-text-primary);
+  --keyboard-toolbar-text-active: var(--color-accent-red);
+  --keyboard-toolbar-background: transparent;
+  --keyboard-toolbar-background-hover: #e8e8ed;
+  --keyboard-toolbar-background-selected: transparent;
+
+  /* Keycaps */
   --keycap-background: #ffffff;
   --keycap-background-hover: #f5f5f7;
   --keycap-background-active: #e5e5ea;
   --keycap-text: var(--color-text-primary);
   --keycap-secondary-text: var(--color-text-secondary);
   --keycap-border: transparent;
-  --keycap-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
-  
+
+  /* Variant / action / primary keycaps */
   --variant-keycap-background: #e8e8ed;
   --variant-keycap-text: var(--color-text-primary);
-  
+
   --action-keycap-background: #d1d1d6;
   --action-keycap-background-active: #c7c7cc;
-  
+
   --primary-keycap-background: var(--color-accent-red);
   --primary-keycap-background-active: var(--color-accent-red-hover);
   --primary-keycap-text: #ffffff;
-}
-
-:deep(.ML__keyboard) {
-  width: 100% !important;
-  height: 100% !important;
-  max-height: none !important;
-  --keyboard-toolbar-background: transparent !important;
-  font-family: var(--font-ui) !important;
-}
-
-:deep(.ML__keycap) {
-  border-radius: 6px !important;
-  transition: transform var(--transition-fast), background-color var(--transition-fast) !important;
-  margin: 3px !important;
-  font-weight: 500 !important;
-}
-
-:deep(.ML__keycap:hover) {
-  transform: scale(1.03);
-}
-
-:deep(.ML__keycap:active),
-:deep(.ML__keycap.is-pressed) {
-  transform: scale(0.95);
-}
-
-:deep(.ML__toolbar) {
-  border-bottom: 1px solid var(--color-divider-light) !important;
 }
 </style>

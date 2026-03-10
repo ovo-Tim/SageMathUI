@@ -218,6 +218,27 @@ def parse_latex_to_sage(latex_str):
 
     # Whitespace normalization
     s = re.sub(r"\s+", " ", s).strip()
+
+    # Wrap unparenthesized function arguments for trig/log functions
+    _MATH_FUNCS = ["sin", "cos", "tan", "cot", "sec", "csc", "log", "ln"]
+    for _fn in _MATH_FUNCS:
+        # Case 1: func + space(s) + arg not starting with paren
+        # e.g. "sin 2pi" -> "sin(2pi)", "cos 0" -> "cos(0)"
+        s = re.sub(rf"\b{_fn}\s+(?!\()(-?[^\s+\-=,)]+)", rf"{_fn}(\1)", s)
+        # Case 2: func directly followed by digit-starting arg (no space)
+        # e.g. "sin2pi" -> "sin(2pi)"
+        s = re.sub(rf"\b{_fn}(?!\()(\d[\w.*^]*)", rf"{_fn}(\1)", s)
+
+    # Case 3: func directly followed by known variable/constant (no space)
+    # e.g. "sinpi" -> "sin(pi)", "cosx" -> "cos(x)"
+    _KNOWN_NAMES = ["pi", "x", "y", "z", "t", "n", "k", "a", "b", "c"]
+    for _fn in _MATH_FUNCS:
+        for _name in _KNOWN_NAMES:
+            s = re.sub(rf"\b{_fn}{_name}\b", rf"{_fn}({_name})", s)
+
+    # Implicit multiplication: 2pi -> 2*pi, 3x -> 3*x
+    s = re.sub(r"(\d)([a-zA-Z])", r"\1*\2", s)
+
     return s
 
 

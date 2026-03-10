@@ -1,19 +1,27 @@
 mod solver;
 
-use solver::{LocalSageSolver, OperationType, Solver, SolverRequest, SolverResponse, SolverStatus};
+#[cfg(not(target_os = "android"))]
+use solver::LocalSageSolver;
+#[cfg(target_os = "android")]
+use solver::AndroidSageSolver;
+use solver::{OperationType, Solver, SolverRequest, SolverResponse, SolverStatus};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-/// Managed state containing the solver instance
 pub struct SolverState {
+    #[cfg(not(target_os = "android"))]
     solver: Arc<Mutex<LocalSageSolver>>,
+    #[cfg(target_os = "android")]
+    solver: Arc<Mutex<AndroidSageSolver>>,
 }
 
 impl SolverState {
-    /// Create a new SolverState with auto-detected sage path
     pub fn new() -> Self {
         Self {
+            #[cfg(not(target_os = "android"))]
             solver: Arc::new(Mutex::new(LocalSageSolver::new(None))),
+            #[cfg(target_os = "android")]
+            solver: Arc::new(Mutex::new(AndroidSageSolver::new())),
         }
     }
 }
