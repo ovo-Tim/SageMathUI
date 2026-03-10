@@ -1,0 +1,40 @@
+:root {
+  --color-accent-red: #A30021;
+  --color-header-bg: #1a1a2e;
+  --color-keyboard-bg: #F0F0F5;
+  --color-result-bar: #A30021;
+  --color-white: #FFFFFF;
+  --color-text-primary: #1a1a1a;
+  --color-text-secondary: #666666;
+  --color-divider: #CCCCCC;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: #000; /* Outer background to see centering */
+}
+
+#app {
+  width: 100%;
+  height: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+  background-color: var(--color-white);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
+
+.serif-font {
+  font-family: 'Times New Roman', Times, serif;
+}
