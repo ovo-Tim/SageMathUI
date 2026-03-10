@@ -1,3 +1,0 @@
-        Info ANDROID_HOME not set, trying to locate Android SDK...
-        Info Using installed Android SDK: /Users/tim/Library/Android/sdk
-       Error failed to ensure Android environment: Skipping Android Studio command line tools installation. Please go through the manual setup process described in the documentation: https://tauri.app/start/prerequisites/#android

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref, onMounted } from 'vue';
 import MathInput from './components/MathInput.vue';
 import MathKeyboard from './components/MathKeyboard.vue';
 import ResultDisplay from './components/ResultDisplay.vue';
@@ -6,24 +7,73 @@ import StepByStep from './components/StepByStep.vue';
 import { useSolverStore } from './stores/solver';
 
 const solver = useSolverStore();
+const statusChecking = ref(true);  // Start as "checking" (yellow dot)
+const showStatusPopup = ref(false);
 
 function handleSolve() {
   if (solver.latex.trim()) {
     const operation = solver.latex.includes('=') ? 'solve' : 'simplify';
+    console.log('[DEBUG] LaTeX:', solver.latex, 'Operation:', operation);
     solver.solveMath(operation);
   }
 }
+
+async function handleStatusCheck() {
+  statusChecking.value = true;
+  showStatusPopup.value = true;
+  await solver.checkStatus();
+  statusChecking.value = false;
+  // Auto-hide after 4 seconds
+  setTimeout(() => {
+    showStatusPopup.value = false;
+  }, 4000);
+}
+
+onMounted(async () => {
+  // Retry with delay to allow solver subprocess to initialize
+  for (let i = 0; i < 3; i++) {
+    await new Promise(r => setTimeout(r, 1500));
+    await solver.checkStatus();
+    if (solver.solverStatus?.connected) break;
+  }
+  statusChecking.value = false;
+});
 </script>
 
 <template>
   <div class="calculator-app">
     <!-- Header -->
     <header class="app-header">
-      <button class="icon-button" aria-label="Back">
-        <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="19" y1="12" x2="5" y2="12"></line>
-          <polyline points="12 19 5 12 12 5"></polyline>
-        </svg>
+      <button class="icon-button status-button" aria-label="Solver Status" @click="handleStatusCheck">
+        <span
+          class="status-dot"
+          :class="{
+            'status-connected': solver.solverStatus?.connected,
+            'status-disconnected': solver.solverStatus && !solver.solverStatus.connected,
+            'status-unknown': !solver.solverStatus,
+            'status-checking': statusChecking,
+          }"
+        ></span>
+        <transition name="popup-fade">
+          <div v-if="showStatusPopup" class="status-popup">
+            <template v-if="statusChecking">
+              <span class="status-popup-label">Checking...</span>
+            </template>
+            <template v-else-if="solver.solverStatus">
+              <span class="status-popup-icon" :class="solver.solverStatus.connected ? 'ok' : 'err'">
+                {{ solver.solverStatus.connected ? '✓' : '✗' }}
+              </span>
+              <span class="status-popup-label">{{ solver.solverStatus.backend_name }}</span>
+              <span v-if="solver.solverStatus.version" class="status-popup-version">
+                v{{ solver.solverStatus.version }}
+              </span>
+            </template>
+            <template v-else>
+              <span class="status-popup-icon err">✗</span>
+              <span class="status-popup-label">No solver</span>
+            </template>
+          </div>
+        </transition>
       </button>
       <h1 class="header-title">Calculator</h1>
       <button class="icon-button" aria-label="History">
@@ -122,6 +172,98 @@ function handleSolve() {
 .icon-button:active {
   transform: scale(0.92);
   background-color: rgba(255, 255, 255, 0.15);
+}
+
+/* Status button & dot */
+.status-button {
+  position: relative;
+}
+
+.status-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: block;
+  transition: background-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.status-dot.status-connected {
+  background-color: #4ade80;
+  box-shadow: 0 0 6px rgba(74, 222, 128, 0.6);
+}
+
+.status-dot.status-disconnected {
+  background-color: #f87171;
+  box-shadow: 0 0 6px rgba(248, 113, 113, 0.6);
+}
+
+.status-dot.status-unknown {
+  background-color: #a1a1aa;
+  box-shadow: none;
+}
+
+.status-dot.status-checking {
+  background-color: #facc15;
+  box-shadow: 0 0 6px rgba(250, 204, 21, 0.6);
+  animation: pulse-dot 1s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* Status popup */
+.status-popup {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  background: rgba(30, 30, 30, 0.95);
+  backdrop-filter: blur(8px);
+  border-radius: 8px;
+  padding: 8px 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  z-index: 100;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: #fff;
+}
+
+.status-popup-icon {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.status-popup-icon.ok {
+  color: #4ade80;
+}
+
+.status-popup-icon.err {
+  color: #f87171;
+}
+
+.status-popup-label {
+  font-weight: 500;
+}
+
+.status-popup-version {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 11px;
+}
+
+.popup-fade-enter-active,
+.popup-fade-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.popup-fade-enter-from,
+.popup-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 
 .header-title {

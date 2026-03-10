@@ -42,7 +42,7 @@ html, body {
   height: 100vh;
   overflow: hidden;
   font-family: var(--font-ui);
-  background-color: #000;
+  background-color: var(--color-white);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -50,8 +50,6 @@ html, body {
 #app {
   width: 100%;
   height: 100%;
-  max-width: 480px;
-  margin: 0 auto;
   background-color: var(--color-white);
   display: flex;
   flex-direction: column;

@@ -126,7 +126,7 @@ impl LocalSageSolver {
             .arg(&self.bridge_script)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
+            .stderr(std::process::Stdio::inherit())
             .spawn()
             .map_err(|e| {
                 format!(
@@ -317,6 +317,10 @@ impl Solver for LocalSageSolver {
 
     fn status(&self) -> Pin<Box<dyn Future<Output = SolverStatus> + Send + '_>> {
         Box::pin(async move {
+            // Auto-start the solver if it's not running yet
+            if !self.is_running().await {
+                let _ = self.start().await;
+            }
             SolverStatus {
                 connected: self.is_running().await,
                 backend_name: "SageMath (local)".to_string(),

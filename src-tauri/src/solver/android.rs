@@ -19,25 +19,25 @@ struct EmbeddedPythonProcess {
 
 pub struct AndroidSageSolver {
     process: Arc<Mutex<Option<EmbeddedPythonProcess>>>,
-    python_root: PathBuf,
+    python_binary: PathBuf,
+    python_home: PathBuf,
     bridge_script: PathBuf,
+    native_lib_dir: PathBuf,
 }
 
 impl AndroidSageSolver {
-    pub fn new() -> Self {
-        let base = PathBuf::from("/data/data/com.sagemath.ui/files");
+    pub fn new(
+        python_binary: PathBuf,
+        python_home: PathBuf,
+        bridge_script: PathBuf,
+        native_lib_dir: PathBuf,
+    ) -> Self {
         Self {
             process: Arc::new(Mutex::new(None)),
-            python_root: base.join("python"),
-            bridge_script: base.join("sage_bridge.py"),
-        }
-    }
-
-    pub fn with_paths(python_root: PathBuf, bridge_script: PathBuf) -> Self {
-        Self {
-            process: Arc::new(Mutex::new(None)),
-            python_root,
+            python_binary,
+            python_home,
             bridge_script,
+            native_lib_dir,
         }
     }
 
@@ -47,35 +47,36 @@ impl AndroidSageSolver {
             return Ok(());
         }
 
-        let python_bin = self.python_root.join("bin/python3");
-        if !python_bin.exists() {
+        if !self.python_binary.exists() {
             return Err(format!(
-                "Python not found at {}. SageMath Android bundle not extracted.",
-                python_bin.display()
+                "Python binary not found at {}. Run asset extraction first.",
+                self.python_binary.display()
             ));
         }
 
         if !self.bridge_script.exists() {
             return Err(format!(
-                "sage_bridge.py not found at {}",
+                "Bridge script not found at {}",
                 self.bridge_script.display()
             ));
         }
 
-        let site_packages = self.python_root.join("lib/python3.12/site-packages");
-        let lib_dir = self.python_root.join("lib");
+        let stdlib = self.python_home.join("lib/python3.13");
+        let site_packages = stdlib.join("site-packages");
+        let python_path = format!("{}:{}", stdlib.display(), site_packages.display());
 
-        let mut child = Command::new(&python_bin)
+        let mut child = Command::new(&self.python_binary)
+            .arg("-u")
             .arg(&self.bridge_script)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .env("PYTHONPATH", site_packages.to_str().unwrap_or(""))
-            .env("LD_LIBRARY_PATH", lib_dir.to_str().unwrap_or(""))
+            .env("PYTHONHOME", self.python_home.to_str().unwrap_or(""))
+            .env("PYTHONPATH", &python_path)
+            .env("LD_LIBRARY_PATH", self.native_lib_dir.to_str().unwrap_or(""))
             .env("PYTHONDONTWRITEBYTECODE", "1")
-            .env("SAGE_ROOT", self.python_root.to_str().unwrap_or(""))
             .spawn()
-            .map_err(|e| format!("Failed to start embedded Python: {}", e))?;
+            .map_err(|e| format!("Failed to start Python: {}", e))?;
 
         let stdin = child.stdin.take().ok_or("Failed to capture stdin")?;
         let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
@@ -179,7 +180,7 @@ impl Solver for AndroidSageSolver {
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false),
                 result_latex: response
-                    .get("result")
+                    .get("result_latex")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string()),
                 steps: response
@@ -212,7 +213,7 @@ impl Solver for AndroidSageSolver {
             let proc = self.process.lock().await;
             SolverStatus {
                 connected: proc.is_some(),
-                backend_name: "SageMath (Android/Embedded)".to_string(),
+                backend_name: "SageMath (Android/SymPy)".to_string(),
                 version: Some("0.1.0".to_string()),
             }
         })

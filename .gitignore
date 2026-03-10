@@ -19,6 +19,7 @@ debug/
 
 # IDE
 .idea/
+.vscode/
 *.swp
 *.swo
 
@@ -29,3 +30,24 @@ Thumbs.db
 # Env
 .env
 .env.local
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.ruff_cache/
+
+# SageMath Android cross-compilation (large binaries)
+sagemath-android/
+
+# Android build assets (bundled Python runtime, generated)
+src-tauri/gen/android/app/src/main/assets/
+src-tauri/gen/android/app/src/main/jniLibs/
+
+# Agent context / session notes (not source code)
+agent-context/
+NEXT_STEPS.txt
+PHASE4_SUMMARY.txt
+
+# Logs
+*.log

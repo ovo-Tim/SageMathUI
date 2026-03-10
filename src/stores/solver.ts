@@ -50,6 +50,7 @@ export const useSolverStore = defineStore('solver', () => {
       }
 
       const response = await invoke<SolverResponse>('solve_math', payload);
+      console.log('[DEBUG] Response:', JSON.stringify(response));
 
       if (response.success) {
         resultLatex.value = response.result_latex;
