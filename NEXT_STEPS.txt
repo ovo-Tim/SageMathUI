@@ -1,0 +1,197 @@
+================================================================================
+  SAGEMATH ANDROID APP - NEXT STEPS (Phase 4: Build & Integration)
+================================================================================
+
+CURRENT STATUS: ✅ READY TO BUILD
+  - All source code complete and compiling
+  - Architecture fully implemented
+  - No blocking issues
+
+NEXT IMMEDIATE ACTIONS (in order):
+
+1. DOWNLOAD TERMUX BOOTSTRAP
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Location: /Users/tim/my_project/SageMathUI/src-tauri/gen/android/app/src/main/cpp/
+   File: bootstrap-aarch64.zip (30.7 MB)
+   
+   Command:
+   $ cd /Users/tim/my_project/SageMathUI/src-tauri/gen/android/app/src/main/cpp
+   $ curl -L -o bootstrap-aarch64.zip \
+     https://github.com/termux/termux-packages/releases/download/bootstrap-2026.03.08-r1/bootstrap-aarch64.zip
+   
+   Verify:
+   $ ls -lh bootstrap-aarch64.zip
+   # Should show: -rw-r--r--  1 tim  staff   30.7M Mar 10 2026 bootstrap-aarch64.zip
+
+2. INSTALL ANDROID DEVELOPMENT TOOLS (if not already done)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   
+   Install NDK:
+   $ sdkmanager "ndk;25.2.9519653"
+   
+   Add Rust Android target:
+   $ rustup target add aarch64-linux-android
+   
+   Verify:
+   $ rustup target list | grep aarch64-linux-android
+   # Should show: aarch64-linux-android (installed)
+
+3. BUILD APK FOR ANDROID
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   
+   $ cd /Users/tim/my_project/SageMathUI
+   $ cargo tauri android build --release
+   
+   This will:
+   - Compile Rust code for aarch64-linux-android
+   - Compile C/JNI code with NDK
+   - Embed bootstrap-aarch64.zip in APK
+   - Package as signed APK
+   
+   Expected output location:
+   src-tauri/gen/android/app/build/outputs/apk/release/sage-ui-0.1.0-release.apk
+   
+   Expected APK size: 170-200 MB
+
+4. TEST ON DEVICE (requires Android device or emulator)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   
+   Install APK:
+   $ adb install -r src-tauri/gen/android/app/build/outputs/apk/release/sage-ui-0.1.0-release.apk
+   
+   Launch app:
+   $ adb shell am start -n com.sagemath.ui/.MainActivity
+   
+   Monitor logs:
+   $ adb logcat -s Bootstrap,Python,SageMath
+   
+   Expected first-run behavior:
+   - App launches and displays WebView
+   - Bootstrap extraction begins (30-60 seconds)
+   - Log messages indicate progress
+   - After extraction, bootstrap is cached for future launches
+   
+   Test math computation:
+   - Open app UI
+   - Enter expression: "x+2=5"
+   - Operation: "solve"
+   - Expected result: "x=3"
+
+================================================================================
+  TROUBLESHOOTING GUIDE
+================================================================================
+
+Problem: "bootstrap-aarch64.zip: No such file or directory"
+Solution: 
+  $ mkdir -p src-tauri/gen/android/app/src/main/cpp
+  $ cd src-tauri/gen/android/app/src/main/cpp
+  $ curl -L -o bootstrap-aarch64.zip <URL>
+
+Problem: "NDK not found" or "cmake not found"
+Solution:
+  $ sdkmanager "cmake;3.22.1"
+  $ sdkmanager "ndk;25.2.9519653"
+  $ export NDK_HOME=$ANDROID_HOME/ndk/25.2.9519653
+
+Problem: "aarch64-linux-android target not installed"
+Solution:
+  $ rustup target add aarch64-linux-android
+  $ rustup target list | grep aarch64  # Verify
+
+Problem: "APK build failed with C compilation errors"
+Solution:
+  - Ensure CMakeLists.txt is in the correct location
+  - Check that bootstrap-aarch64.zip exists
+  - Clean and rebuild: $ cargo clean && cargo tauri android build --release
+
+Problem: "Bootstrap extraction fails on device"
+Solution:
+  - Check device has 200+ MB free space
+  - Check app has storage permissions (should be automatic)
+  - Check adb logcat for specific error messages
+  - Try uninstalling and reinstalling APK
+
+Problem: "Math computation not working"
+Solution:
+  - Verify bootstrap extracted successfully (check for /data/data/com.sagemath.ui/files/termux_prefix/bin/python3)
+  - Test Python directly: $ adb shell /data/data/com.sagemath.ui/files/termux_prefix/bin/python3 --version
+  - Check sage_bridge.py compatibility with Python 3.13.12
+
+================================================================================
+  DOCUMENTATION TO REFERENCE
+================================================================================
+
+For detailed information, see:
+- ANDROID_BUILD_GUIDE.md ............ Complete build instructions with prerequisites
+- IMPLEMENTATION_STATUS.md ......... Progress tracking, testing checklists, next phases
+- SESSION_SUMMARY.md ............... What was accomplished, architecture overview
+- START_HERE.md .................... Quick navigation guide (from research phase)
+
+================================================================================
+  SUCCESS CRITERIA FOR THIS PHASE
+================================================================================
+
+✅ Phase 4 (Build & Integration) is complete when:
+  □ APK builds without errors
+  □ APK size is 170-200 MB (confirms bootstrap is embedded)
+  □ APK installs on Android device
+  □ Bootstrap extracts on first launch without errors
+  □ Python 3.13.12 can be executed
+  □ Simple math operation (solve x+2=5) returns x=3
+
+After successful Phase 4:
+  → Move to Phase 5: Device Testing & Optimization (4-8 hours)
+  → Then Phase 6: Play Store Release (2-4 hours)
+
+================================================================================
+  QUICK REFERENCE: IMPORTANT PATHS
+================================================================================
+
+Source directories:
+  ${PROJECT}/src-tauri/src/              → Rust backend
+  ${PROJECT}/src-tauri/sage_bridge.py    → Python daemon
+  ${PROJECT}/src-tauri/gen/android/      → Android build config
+  ${PROJECT}/src/                        → Vue.js frontend
+
+Build output:
+  ${PROJECT}/src-tauri/target/           → Build artifacts
+  ${PROJECT}/src-tauri/gen/android/app/build/outputs/apk/release/
+    → APK file (after build)
+
+Bootstrap location:
+  ${PROJECT}/src-tauri/gen/android/app/src/main/cpp/bootstrap-aarch64.zip
+  (30.7 MB, downloaded in step 1)
+
+Installation path on device:
+  /data/data/com.sagemath.ui/files/termux_prefix/
+
+================================================================================
+  ESTIMATED TIMELINE
+================================================================================
+
+Task 1: Download bootstrap          ~5 minutes
+Task 2: Install NDK/tools          ~10 minutes (if not already installed)
+Task 3: Build APK                  30-60 minutes (first time, faster on repeat)
+Task 4: Test on device             15-30 minutes
+Task 5: Debug/fix issues           Variable (0-4 hours)
+
+Total estimated time: 1-3 hours (assuming no major issues)
+
+If you encounter blocking issues, reference ANDROID_BUILD_GUIDE.md for
+detailed troubleshooting.
+
+================================================================================
+  STATUS DASHBOARD
+================================================================================
+
+Phase 1: Research ..................... ✅ COMPLETE
+Phase 2: Architecture ................ ✅ COMPLETE
+Phase 3: Backend Implementation ...... ✅ COMPLETE
+Phase 4: Build & Integration ......... ⏳ READY TO START ← YOU ARE HERE
+Phase 5: Device Testing .............. ⏳ PENDING
+Phase 6: Play Store Release .......... ⏳ PENDING
+
+Remaining effort: ~12-16 hours over 2-3 weeks
+Completion target: Late March 2026
+
+================================================================================
