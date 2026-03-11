@@ -40,6 +40,10 @@ __pycache__/
 # SageMath Android cross-compilation (large binaries)
 sagemath-android/
 
+# SageMath desktop bundle (downloaded Python + SymPy runtime)
+sagemath-desktop-build/
+src-tauri/resources/sagemath-bundle.tar.gz
+
 # Android build assets (bundled Python runtime, generated)
 src-tauri/gen/android/app/src/main/assets/
 src-tauri/gen/android/app/src/main/jniLibs/

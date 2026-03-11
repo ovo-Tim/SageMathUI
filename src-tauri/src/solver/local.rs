@@ -16,10 +16,22 @@ use super::types::*;
 
 const IO_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Determines how the solver spawns Python/SageMath.
+#[derive(Debug, Clone)]
+enum SolverMode {
+    /// Use system-installed `sage --python` (lite / user-installed SageMath).
+    SystemSage { sage_path: String },
+    /// Use a bundled portable Python extracted from app resources (full build).
+    BundledPython {
+        python_bin: PathBuf,
+        python_home: PathBuf,
+    },
+}
+
 pub struct LocalSageSolver {
     process: Arc<Mutex<Option<SageProcess>>>,
     bridge_script: PathBuf,
-    sage_path: String,
+    mode: SolverMode,
     backend_info: Arc<Mutex<Option<(String, Option<String>)>>>,
 }
 
@@ -30,12 +42,132 @@ struct SageProcess {
 }
 
 impl LocalSageSolver {
-    pub fn new(sage_path: Option<String>) -> Self {
+    pub fn new(
+        sage_path: Option<String>,
+        resource_dir: Option<PathBuf>,
+        app_data_dir: Option<PathBuf>,
+    ) -> Self {
+        let mode = Self::detect_mode(sage_path, resource_dir, app_data_dir);
+
         Self {
             process: Arc::new(Mutex::new(None)),
             bridge_script: Self::resolve_bridge_script_path(),
-            sage_path: Self::resolve_sage_path(sage_path),
+            mode,
             backend_info: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// Detect whether a bundled Python is available, falling back to system sage.
+    fn detect_mode(
+        sage_path: Option<String>,
+        resource_dir: Option<PathBuf>,
+        app_data_dir: Option<PathBuf>,
+    ) -> SolverMode {
+        // Try to set up bundled Python from app resources
+        if let (Some(res_dir), Some(data_dir)) = (resource_dir, app_data_dir) {
+            if let Some((python_bin, python_home)) =
+                Self::try_setup_bundle(&res_dir, &data_dir)
+            {
+                eprintln!(
+                    "[solver] Using bundled Python at {}",
+                    python_bin.display()
+                );
+                return SolverMode::BundledPython {
+                    python_bin,
+                    python_home,
+                };
+            }
+        }
+
+        // Fall back to system sage
+        let sage_path = Self::resolve_sage_path(sage_path);
+        eprintln!("[solver] Using system SageMath at {}", sage_path);
+        SolverMode::SystemSage { sage_path }
+    }
+
+    /// Check for a bundled SageMath tarball in resources and extract if needed.
+    /// Returns (python_binary, python_home) if bundle is available.
+    fn try_setup_bundle(
+        resource_dir: &Path,
+        app_data_dir: &Path,
+    ) -> Option<(PathBuf, PathBuf)> {
+        // Tauri v2 preserves directory structure from config, so the tarball
+        // ends up at <resource_dir>/resources/sagemath-bundle.tar.gz
+        let bundle_tar = resource_dir.join("resources/sagemath-bundle.tar.gz");
+        if !bundle_tar.exists() {
+            return None;
+        }
+
+        eprintln!(
+            "[solver] Found SageMath bundle at {}",
+            bundle_tar.display()
+        );
+
+        let extract_dir = app_data_dir.join("sagemath");
+        let python_home = extract_dir.join("python");
+        let version_file = extract_dir.join(".bundle-version");
+        let current_version = env!("CARGO_PKG_VERSION");
+
+        // Check if already extracted with the correct app version
+        let needs_extract = if version_file.exists() {
+            let existing = std::fs::read_to_string(&version_file).unwrap_or_default();
+            existing.trim() != current_version
+        } else {
+            true
+        };
+
+        if needs_extract {
+            eprintln!("[solver] Extracting SageMath bundle (first run or upgrade)...");
+
+            // Ensure extract directory exists
+            if let Err(e) = std::fs::create_dir_all(&extract_dir) {
+                eprintln!("[solver] Failed to create extract dir: {}", e);
+                return None;
+            }
+
+            // Extract using system tar (available on all desktop platforms)
+            let result = std::process::Command::new("tar")
+                .args([
+                    "xzf",
+                    &bundle_tar.to_string_lossy(),
+                    "-C",
+                    &extract_dir.to_string_lossy(),
+                ])
+                .output();
+
+            match result {
+                Ok(output) if output.status.success() => {
+                    eprintln!("[solver] Bundle extraction complete");
+                    // Write version marker
+                    let _ = std::fs::write(&version_file, current_version);
+                }
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    eprintln!("[solver] Bundle extraction failed: {}", stderr);
+                    return None;
+                }
+                Err(e) => {
+                    eprintln!("[solver] Failed to run tar: {}", e);
+                    return None;
+                }
+            }
+        }
+
+        // Find the python binary (platform-specific)
+        let python_bin = if cfg!(windows) {
+            python_home.join("python.exe")
+        } else {
+            python_home.join("bin/python3")
+        };
+
+        if python_bin.exists() {
+            Some((python_bin, python_home))
+        } else {
+            eprintln!(
+                "[solver] Bundled Python binary not found at {}",
+                python_bin.display()
+            );
+            None
         }
     }
 
@@ -123,19 +255,73 @@ impl LocalSageSolver {
             ));
         }
 
-        let mut child = Command::new(&self.sage_path)
-            .arg("--python")
-            .arg(&self.bridge_script)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::inherit())
-            .spawn()
-            .map_err(|e| {
-                format!(
-                    "Failed to start SageMath at '{}': {}. Ensure SageMath is installed and available on PATH.",
-                    self.sage_path, e
-                )
-            })?;
+        let mut child = match &self.mode {
+            SolverMode::BundledPython {
+                python_bin,
+                python_home,
+            } => {
+                // Bundled mode: spawn portable Python directly
+                let mut cmd = Command::new(python_bin);
+                cmd.arg("-u").arg(&self.bridge_script);
+
+                // Set up Python environment for the bundled installation
+                cmd.env("PYTHONHOME", python_home);
+                cmd.env("PYTHONDONTWRITEBYTECODE", "1");
+
+                // Build PYTHONPATH for stdlib + site-packages
+                let (stdlib, site_packages) = if cfg!(windows) {
+                    let lib = python_home.join("Lib");
+                    let sp = lib.join("site-packages");
+                    (lib, sp)
+                } else {
+                    // Detect python version from the binary name or lib dir
+                    let lib_dir = python_home.join("lib");
+                    let python_lib = Self::find_python_lib_dir(&lib_dir)
+                        .unwrap_or_else(|| lib_dir.join("python3.12"));
+                    let sp = python_lib.join("site-packages");
+                    (python_lib, sp)
+                };
+
+                let path_sep = if cfg!(windows) { ";" } else { ":" };
+                cmd.env(
+                    "PYTHONPATH",
+                    format!(
+                        "{}{}{}",
+                        stdlib.display(),
+                        path_sep,
+                        site_packages.display()
+                    ),
+                );
+
+                cmd.stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::inherit())
+                    .spawn()
+                    .map_err(|e| {
+                        format!(
+                            "Failed to start bundled Python at '{}': {}",
+                            python_bin.display(),
+                            e
+                        )
+                    })?
+            }
+            SolverMode::SystemSage { sage_path } => {
+                // System mode: spawn sage --python
+                Command::new(sage_path)
+                    .arg("--python")
+                    .arg(&self.bridge_script)
+                    .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::inherit())
+                    .spawn()
+                    .map_err(|e| {
+                        format!(
+                            "Failed to start SageMath at '{}': {}. Ensure SageMath is installed and available on PATH.",
+                            sage_path, e
+                        )
+                    })?
+            }
+        };
 
         let stdin = child
             .stdin
@@ -196,6 +382,23 @@ impl LocalSageSolver {
         });
 
         Ok(())
+    }
+
+    /// Find the python3.XX lib directory under lib/
+    fn find_python_lib_dir(lib_dir: &Path) -> Option<PathBuf> {
+        if !lib_dir.exists() {
+            return None;
+        }
+        if let Ok(entries) = std::fs::read_dir(lib_dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+                if name_str.starts_with("python3.") && entry.path().is_dir() {
+                    return Some(entry.path());
+                }
+            }
+        }
+        None
     }
 
     pub async fn send_request(&self, request: &SolverRequest) -> Result<SolverResponse, String> {
