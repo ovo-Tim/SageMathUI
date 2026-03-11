@@ -17,8 +17,8 @@ source "$SCRIPT_DIR/env-android.sh"
 
 MPFR_VERSION="4.2.1"
 MPFR_TARBALL="mpfr-${MPFR_VERSION}.tar.xz"
-MPFR_URL="https://www.mpfr.org/mpfr-current/${MPFR_TARBALL}"
-MPFR_MIRROR="https://mirrors.tuna.tsinghua.edu.cn/gnu/mpfr/${MPFR_TARBALL}"
+MPFR_URL="https://www.mpfr.org/mpfr-${MPFR_VERSION}/${MPFR_TARBALL}"
+MPFR_MIRROR="https://ftp.gnu.org/gnu/mpfr/${MPFR_TARBALL}"
 MPFR_SRC="${SAGEMATH_SRC_DIR}/mpfr-${MPFR_VERSION}"
 MPFR_BUILD="${SAGEMATH_BUILD_DIR}/mpfr"
 
