@@ -23,79 +23,184 @@ onMounted(() => {
 
     // Configure Custom Keyboard Layouts
     if (window.mathVirtualKeyboard) {
+      const backspaceKey = {
+        class: 'action',
+        label: "<svg><use xlink:href='#svg-delete-backward' /></svg>",
+        command: ['performWithFeedback', 'deleteBackward']
+      };
+
       window.mathVirtualKeyboard.layouts = [
+        // Tab 1: Arithmetic — matches PhotoMath key4.jpeg
         {
-          label: '123',
-          tooltip: 'Basic',
+          label: '+ ×',
+          tooltip: 'Numbers & Operators',
           rows: [
             [
-              { latex: 'x' }, { latex: '^' }, { latex: '\\sqrt{#0}' }, { latex: '(' }, { latex: ')' }
+              { latex: '(#0)', label: '( )' },
+              { latex: '>' },
+              { latex: '7' },
+              { latex: '8' },
+              { latex: '9' },
+              { latex: '\\div' }
             ],
             [
-              { latex: '7' }, { latex: '8' }, { latex: '9' }, { latex: '\\times' }, { latex: '\\div' }
+              { latex: '\\frac{#0}{#0}', class: 'small' },
+              { latex: '\\sqrt{#0}' },
+              { latex: '4' },
+              { latex: '5' },
+              { latex: '6' },
+              { latex: '\\times' }
             ],
             [
-              { latex: '4' }, { latex: '5' }, { latex: '6' }, { latex: '+' }, { latex: '-' }
+              { latex: '^{#?}', label: 'x<sup>□</sup>' },
+              { latex: 'x' },
+              { latex: '1' },
+              { latex: '2' },
+              { latex: '3' },
+              { latex: '-' }
             ],
             [
-              { latex: '1' }, { latex: '2' }, { latex: '3' }, { latex: '=' }, {
-                class: 'action',
-                label: "<svg><use xlink:href='#svg-delete-backward' /></svg>",
-                command: ['performWithFeedback', 'deleteBackward']
-              }
-            ],
-            [
-              { latex: '0', width: 2 }, { latex: '.' }, { latex: ',' }
+              { latex: '\\pi' },
+              { latex: '\\%', label: '%' },
+              { latex: '0' },
+              { latex: '.' },
+              { latex: '=' },
+              { latex: '+' }
             ]
           ]
         },
+        // Tab 2: Functions — matches PhotoMath key3.jpeg
         {
-          label: 'ƒ(x)',
+          label: 'f(x)',
           tooltip: 'Functions',
           rows: [
             [
-              { latex: '\\sin' }, { latex: '\\cos' }, { latex: '\\tan' }
+              { latex: '\\vert #0 \\vert', class: 'small', label: '|□|' },
+              { latex: '\\log_{10}', class: 'small', label: 'log₁₀' },
+              { latex: '\\log_{2}', class: 'small', label: 'log₂' },
+              { latex: '\\log_{#?}', class: 'small', label: 'log<sub>□</sub>' },
+              { latex: 'i' },
+              { latex: '!' }
             ],
             [
-              { latex: '\\log' }, { latex: '\\ln' }, { latex: '\\vert #0 \\vert' }
+              { latex: '_{#?}', label: 'x<sub>n</sub>' },
+              { latex: 'e' },
+              { latex: '\\exp', class: 'small' },
+              { latex: '\\ln' },
+              { latex: '\\overline{#0}', label: 'z̄' },
+              { latex: '\\infty' }
             ],
             [
-              { latex: '!' }, { latex: '\\pi' }, { latex: 'e' }, { latex: '\\infty' }
+              { latex: '\\sqrt[#?]{#0}', class: 'small', label: '<sup>n</sup>√' },
+              { latex: '\\binom{#?}{#?}', class: 'small' },
+              { latex: '\\begin{pmatrix}#?&#?\\\\#?&#?\\end{pmatrix}', class: 'small', label: '2×2' },
+              { latex: '\\begin{pmatrix}#?&#?&#?\\\\#?&#?&#?\\\\#?&#?&#?\\end{pmatrix}', class: 'small', label: '3×3' },
+              { latex: '\\begin{vmatrix}#?&#?\\\\#?&#?\\end{vmatrix}', class: 'small', label: 'det' },
+              { latex: '\\operatorname{sign}', class: 'small', label: 'sign' }
+            ],
+            [
+              { latex: '\\le', label: '≤' },
+              { latex: '\\ge', label: '≥' },
+              { latex: '\\ne', label: '≠' },
+              { latex: '\\pm', label: '±' },
+              { latex: '<' },
+              backspaceKey
+            ],
+            [
+              { latex: '\\cdot', label: '·' },
+              { latex: '\\arg', class: 'small', label: 'arg' },
+              { latex: '\\Re', label: 'ℜ' },
+              { latex: '\\Im', label: 'ℑ' },
+              { latex: '\\vec{#0}', class: 'small', label: 'x⃗' },
+              { latex: '\\hat{#0}', class: 'small', label: 'x̂' }
             ]
           ]
         },
+        // Tab 3: Trigonometry — matches PhotoMath keyboard2.jpeg
         {
-          label: 'Trig',
-          tooltip: 'Trig',
+          label: 'sin cos',
+          tooltip: 'Trigonometry',
           rows: [
             [
-              { latex: '\\sin^{-1}' }, { latex: '\\cos^{-1}' }, { latex: '\\tan^{-1}' }
+              { latex: '^{\\circ}', label: '°' },
+              { latex: '\\sin' },
+              { latex: '\\cos' },
+              { latex: '\\tan' },
+              { latex: '\\cot' },
+              { latex: '\\sec' }
             ],
             [
-              { latex: '\\sinh' }, { latex: '\\cosh' }, { latex: '\\tanh' }
+              { latex: '\\csc' },
+              { latex: '\\arcsin', class: 'small' },
+              { latex: '\\arccos', class: 'small' },
+              { latex: '\\arctan', class: 'small' },
+              { latex: '\\operatorname{arccot}', class: 'small', label: 'arccot' },
+              { latex: '\\operatorname{arcsec}', class: 'small', label: 'arcsec' }
             ],
             [
-              { latex: '\\sec' }, { latex: '\\csc' }, { latex: '\\cot' }
+              { latex: '\\theta' },
+              { latex: '\\sinh', class: 'small' },
+              { latex: '\\cosh', class: 'small' },
+              { latex: '\\tanh', class: 'small' },
+              { latex: '\\coth', class: 'small' },
+              { latex: '\\operatorname{sech}', class: 'small', label: 'sech' }
+            ],
+            [
+              backspaceKey,
+              { latex: '\\operatorname{arcsinh}', class: 'small', label: 'arsinh' },
+              { latex: '\\operatorname{arccosh}', class: 'small', label: 'arcosh' },
+              { latex: '\\operatorname{arctanh}', class: 'small', label: 'artanh' },
+              { latex: '\\operatorname{arccoth}', class: 'small', label: 'arcoth' },
+              { latex: '\\operatorname{arcsech}', class: 'small', label: 'arsech' }
             ]
           ]
         },
+        // Tab 4: Calculus — matches PhotoMath keyboard1.jpeg
         {
-          label: '∫ d/dx',
+          label: '∫ Σ',
           tooltip: 'Calculus',
           rows: [
             [
-              { latex: '\\int' }, { latex: '\\frac{d}{dx}' }, { latex: '\\lim' }
+              { latex: '\\lim_{#? \\to #?}', class: 'small', label: 'lim' },
+              { latex: '\\frac{d}{dx}', class: 'small' },
+              { latex: '\\int' },
+              { latex: '\\frac{dy}{dx}', class: 'small' },
+              { latex: 'a_{#?}', class: 'small', label: 'a<sub>n</sub>' },
+              { latex: '\\partial' }
             ],
             [
-              { latex: '\\sum' }, { latex: '\\prod' }, { latex: '\\partial' }
+              { latex: '\\lim_{#? \\to #?^{+}}', class: 'small', label: 'lim⁺' },
+              { latex: '\\frac{d}{d#?}', class: 'small' },
+              { latex: '\\int_{#?}^{#?}', class: 'small' },
+              { latex: 'dx' },
+              { latex: 'dy' },
+              { latex: 'dz' }
             ],
             [
-              { latex: 'dx' }, { latex: 'dy' }, { latex: 'dz' }
+              { latex: '\\lim_{#? \\to #?^{-}}', class: 'small', label: 'lim⁻' },
+              { latex: '\\frac{d^{2}}{d#?^{2}}', class: 'small' },
+              { latex: '\\sum_{#?}^{#?}', class: 'small' },
+              { latex: '\\prod_{#?}^{#?}', class: 'small' },
+              { latex: 'dt' },
+              { latex: '\\infty' }
+            ],
+            [
+              { latex: "'", label: "y'" },
+              { latex: '\\sum', class: 'small' },
+              { latex: '\\prod', class: 'small' },
+              { latex: '\\to', label: '→' },
+              { latex: '\\Rightarrow', label: '⇒' },
+              backspaceKey
             ]
           ]
         }
       ];
     }
+
+    // Disable context-menu items that cause "Malformed expression" errors
+    mathfield.menuItems = mathfield.menuItems.filter(
+      (item: any) => !['color', 'background-color', 'variant'].includes(item.id)
+    );
 
     // Set initial value
     if (props.modelValue) {

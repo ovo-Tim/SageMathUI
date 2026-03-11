@@ -378,10 +378,10 @@ onMounted(async () => {
 }
 
 .app-keyboard {
-  height: 280px;
   background-color: var(--color-keyboard-bg);
   flex-shrink: 0;
   box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.08);
   z-index: 10;
+  /* Height is set dynamically by MathKeyboard via geometrychange event */
 }
 </style>

@@ -103,6 +103,7 @@ try:
         asin,
         acos,
         atan,
+        Matrix,
     )
 
     SYMPY_AVAILABLE = True
@@ -139,6 +140,7 @@ if SYMPY_AVAILABLE:
             "arcsin": asin,
             "arccos": acos,
             "arctan": atan,
+            "Matrix": Matrix,
         }
     )
 
@@ -155,7 +157,15 @@ def _get_var(name="x"):
     return _SYMPY_LOCALS.get(name, Symbol(name))
 
 
-_CAS_FN_CALLS = ("integrate(", "integral(", "diff(", "limit(", "Sum(")
+_CAS_FN_CALLS = (
+    "integrate(",
+    "integral(",
+    "diff(",
+    "limit(",
+    "Sum(",
+    "matrix(",
+    "Matrix(",
+)
 
 
 def _to_expr(s):
@@ -194,6 +204,7 @@ def _to_expr(s):
                 "arcsin",
                 "arccos",
                 "arctan",
+                "matrix",
             ]:
                 if hasattr(sage_all, _name):
                     _ns[_name] = getattr(sage_all, _name)
@@ -227,6 +238,20 @@ def _replace_sqrt(m):
     if idx:
         return f"(({radicand})**(1/({idx})))"
     return f"(({radicand})**(1/2))"
+
+
+def _replace_matrix(m):
+    """Convert \\begin{pmatrix}a&b\\\\c&d\\end{pmatrix} → matrix([[a,b],[c,d]])."""
+    content = m.group(1)
+    # Split rows by \\ (literal double-backslash row separator)
+    rows = [r.strip() for r in re.split(r"\\\\", content) if r.strip()]
+    matrix_rows = []
+    for row in rows:
+        elements = [elem.strip() for elem in row.split("&")]
+        matrix_rows.append("[" + ", ".join(elements) + "]")
+    result = "[" + ", ".join(matrix_rows) + "]"
+    fn = "matrix" if SAGE_AVAILABLE else "Matrix"
+    return f"{fn}({result})"
 
 
 def parse_latex_to_expr(latex_str):
@@ -441,6 +466,16 @@ def parse_latex_to_expr(latex_str):
     s = re.sub(r"(\d)(pi|oo|[a-zA-Z])", r"\1*\2", s)
     s = re.sub(r"\)\s*(\w)", r")*\1", s)
 
+    # 9b. Matrices: \begin{pmatrix}...\end{pmatrix} → matrix([[...]])
+    #     Must be BEFORE brace cleanup (step 10) which would destroy \begin{...}
+    s = re.sub(
+        r"\\begin\{[pbvBV]?matrix\}(.+?)\\end\{[pbvBV]?matrix\}",
+        _replace_matrix,
+        s,
+    )
+    # Implicit multiplication between adjacent matrices: )matrix( → )*matrix(
+    s = re.sub(r"\)(matrix|Matrix)\(", r")*\1(", s)
+
     # 10. Clean braces and whitespace
     s = s.replace("{", "(").replace("}", ")")
     s = re.sub(r"\s+", " ", s).strip()
@@ -583,7 +618,11 @@ def _op_simplify(parsed, variable):
     expr = _to_expr(parsed)
 
     if SAGE_AVAILABLE:
-        result = expr.full_simplify()
+        try:
+            result = expr.full_simplify()
+        except (AttributeError, TypeError):
+            # Matrices and other types lack full_simplify(); already evaluated
+            result = expr
     else:
         result = simplify(expr)
 
