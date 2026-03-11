@@ -241,8 +241,12 @@ def _replace_sqrt(m):
 
 
 def _replace_matrix(m):
-    """Convert \\begin{pmatrix}a&b\\\\c&d\\end{pmatrix} → matrix([[a,b],[c,d]])."""
-    content = m.group(1)
+    """Convert \\begin{pmatrix}a&b\\\\c&d\\end{pmatrix} → matrix([[a,b],[c,d]]).
+
+    For \\begin{vmatrix} (determinant notation), wraps with .det().
+    """
+    matrix_type = m.group(1) or ""  # 'p', 'b', 'v', 'V', 'B', or ''
+    content = m.group(2)
     # Split rows by \\ (literal double-backslash row separator)
     rows = [r.strip() for r in re.split(r"\\\\", content) if r.strip()]
     matrix_rows = []
@@ -251,7 +255,11 @@ def _replace_matrix(m):
         matrix_rows.append("[" + ", ".join(elements) + "]")
     result = "[" + ", ".join(matrix_rows) + "]"
     fn = "matrix" if SAGE_AVAILABLE else "Matrix"
-    return f"{fn}({result})"
+    mat_expr = f"{fn}({result})"
+    # vmatrix / Vmatrix = determinant notation
+    if matrix_type in ("v", "V"):
+        return f"{mat_expr}.det()"
+    return mat_expr
 
 
 def parse_latex_to_expr(latex_str):
@@ -467,9 +475,10 @@ def parse_latex_to_expr(latex_str):
     s = re.sub(r"\)\s*(\w)", r")*\1", s)
 
     # 9b. Matrices: \begin{pmatrix}...\end{pmatrix} → matrix([[...]])
+    #     \begin{vmatrix}...\end{vmatrix} → matrix([[...]]).det()
     #     Must be BEFORE brace cleanup (step 10) which would destroy \begin{...}
     s = re.sub(
-        r"\\begin\{[pbvBV]?matrix\}(.+?)\\end\{[pbvBV]?matrix\}",
+        r"\\begin\{([pbvBV]?)matrix\}(.+?)\\end\{[pbvBV]?matrix\}",
         _replace_matrix,
         s,
     )
