@@ -137,10 +137,11 @@ jobs:
 
       - name: Bundle SageMath assets
         run: |
-          cd sagemath-android/install
-          tar czf ../sagemath-bundle.tar.gz \
-            bin/ lib/ share/python3.12/ \
-            lib/python3.12/
+          PREFIX=sagemath-android/install/aarch64-linux-android
+          echo "=== Install prefix contents ==="
+          find "$PREFIX" -maxdepth 2 -type d || true
+          cd "$PREFIX"
+          tar czf ../../sagemath-bundle.tar.gz .
 
       - name: Install frontend dependencies
         run: pnpm install
@@ -150,11 +151,10 @@ jobs:
 
       - name: Copy assets into APK
         run: |
-          mkdir -p src-tauri/gen/android/app/src/main/assets
-          cp sagemath-android/sagemath-bundle.tar.gz \
-            src-tauri/gen/android/app/src/main/assets/
-          cp src-tauri/sage_bridge.py \
-            src-tauri/gen/android/app/src/main/assets/
+          ASSETS=src-tauri/gen/android/app/src/main/assets
+          mkdir -p "$ASSETS"
+          cp sagemath-android/sagemath-bundle.tar.gz "$ASSETS/"
+          cp src-tauri/sage_bridge.py "$ASSETS/"
 
       - name: Build Android APK
         run: pnpm tauri android build --target aarch64
