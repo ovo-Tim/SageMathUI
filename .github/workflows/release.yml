@@ -207,14 +207,30 @@ jobs:
           export CFLAGS="-O2 -fPIC"
 
           mkdir -p cross-build && cd cross-build
+
+          # Disable C extension modules that need system libraries not in NDK
+          cat > ../Modules/Setup.local << 'SETUP'
+          *disabled*
+          _lzma
+          _bz2
+          _ssl
+          _hashlib
+          readline
+          _curses
+          _curses_panel
+          _sqlite3
+          _uuid
+          _ctypes
+          _posixshmem
+          _blake2
+          SETUP
+
           ../configure \
             --host=aarch64-linux-android24 \
             --build=x86_64-linux-gnu \
             --with-build-python="$HOST_PYTHON" \
             --enable-shared \
             --without-ensurepip \
-            --without-lzma \
-            --without-readline \
             --without-doc-strings \
             --disable-test-modules \
             --prefix="$(pwd)/prefix" \
@@ -223,8 +239,8 @@ jobs:
             ac_cv_file__dev_ptc=no \
             -q
           make -j"$(nproc)" -s 2>&1 || {
-            echo "=== Cross-build failed. Checking for missing modules ==="
-            cat config.log | grep -i "error\|cannot find\|not found" | tail -30
+            echo "=== Cross-build failed ==="
+            make -j1 2>&1 | tail -50
             exit 1
           }
           make install -s
