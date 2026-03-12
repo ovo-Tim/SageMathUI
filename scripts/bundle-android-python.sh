@@ -28,11 +28,16 @@ echo ""
 
 echo "=== Step 1: Clean staging area ==="
 rm -rf "$STAGING"
-mkdir -p "$STAGING/python/lib/python3.13"
-mkdir -p "$STAGING/python/lib/python3.13/site-packages"
+mkdir -p "$STAGING/python/lib"
 
 echo "=== Step 2: Copy and trim stdlib ==="
-cp -a "$CROSS_PREFIX/lib/python3.13/" "$STAGING/python/lib/python3.13/"
+# NOTE: Do NOT pre-create python3.13/ dir — cp -a behavior differs between
+# macOS (BSD) and Linux (GNU) when the destination already exists.
+# BSD cp: cp -a dir/ existing_dest/ → copies CONTENTS
+# GNU cp: cp -a dir/ existing_dest/ → copies DIRECTORY into dest (double-nesting!)
+# By letting cp create the destination, behavior is consistent cross-platform.
+cp -a "$CROSS_PREFIX/lib/python3.13" "$STAGING/python/lib/"
+mkdir -p "$STAGING/python/lib/python3.13/site-packages"
 
 REMOVE_DIRS=(
     test tests tkinter idlelib turtledemo ensurepip
