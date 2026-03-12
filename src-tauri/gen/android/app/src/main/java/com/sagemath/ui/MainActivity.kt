@@ -11,7 +11,7 @@ import java.io.IOException
 class MainActivity : TauriActivity() {
     companion object {
         private const val TAG = "SageMathUI"
-        private const val ASSETS_VERSION = "1"
+        private const val ASSETS_VERSION = "2"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -41,6 +41,9 @@ class MainActivity : TauriActivity() {
         Log.i(TAG, "Extracting Python assets (v$ASSETS_VERSION)...")
 
         val pythonDir = File(filesDir, "python")
+        if (pythonDir.exists()) {
+            pythonDir.deleteRecursively()
+        }
         pythonDir.mkdirs()
 
         try {
