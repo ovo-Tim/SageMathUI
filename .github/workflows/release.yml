@@ -186,23 +186,25 @@ jobs:
           NDK=$ANDROID_SDK_ROOT/ndk/27.0.12077973
           TOOLCHAIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64
 
-          export CC=$TOOLCHAIN/bin/aarch64-linux-android24-clang
-          export CXX=$TOOLCHAIN/bin/aarch64-linux-android24-clang++
-          export AR=$TOOLCHAIN/bin/llvm-ar
-          export STRIP=$TOOLCHAIN/bin/llvm-strip
-          export READELF=$TOOLCHAIN/bin/llvm-readelf
-          export CFLAGS="-O2 -fPIC"
-
           wget -q https://www.python.org/ftp/python/3.13.3/Python-3.13.3.tgz
           tar xf Python-3.13.3.tgz
           cd Python-3.13.3
 
+          # Build host Python first (needs native compiler, NOT cross-compiler)
           mkdir -p build-host && cd build-host
           ../configure --prefix="$(pwd)/prefix" -q
           make -j"$(nproc)" -s
           make install -s
           HOST_PYTHON="$(pwd)/prefix/bin/python3.13"
           cd ..
+
+          # Now set cross-compiler for Android build
+          export CC=$TOOLCHAIN/bin/aarch64-linux-android24-clang
+          export CXX=$TOOLCHAIN/bin/aarch64-linux-android24-clang++
+          export AR=$TOOLCHAIN/bin/llvm-ar
+          export STRIP=$TOOLCHAIN/bin/llvm-strip
+          export READELF=$TOOLCHAIN/bin/llvm-readelf
+          export CFLAGS="-O2 -fPIC"
 
           mkdir -p cross-build && cd cross-build
           ../configure \
