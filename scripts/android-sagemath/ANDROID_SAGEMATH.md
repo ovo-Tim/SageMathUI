@@ -1,6 +1,6 @@
-# SageMath Android Integration Guide
+# Android Python Integration Guide
 
-## Architecture Overview
+## Architecture
 
 ```
 ┌─────────────────────────────────────────┐
@@ -14,180 +14,235 @@
 │  └────────────┘                       │  │
 │                                       ▼  │
 │  ┌────────────────────────────────────┐  │
-│  │  Embedded Python 3.12              │  │
+│  │  Embedded Python 3.13              │  │
 │  │  + sage_bridge.py                  │  │
-│  │  + SymPy/mpmath                    │  │
-│  │  + SageMath pure-Python core       │  │
-│  │  + libgmp/mpfr/flint/pari/ntl.a    │  │
+│  │  + SymPy + mpmath                  │  │
 │  └────────────────────────────────────┘  │
 └─────────────────────────────────────────┘
 ```
 
-## Build Pipeline
+The Android app embeds a cross-compiled Python 3.13 interpreter that runs
+`sage_bridge.py`. Communication uses JSON over stdin/stdout (same protocol
+as the desktop `LocalSageSolver`).
 
-### Prerequisites
+### APK structure
 
-- macOS or Linux host
-- Android SDK (API 24+), NDK 27.x
+```
+app.apk
+├── lib/arm64-v8a/
+│   ├── libsage_math_ui_lib.so    # Tauri Rust library
+│   ├── libpython_exec.so         # Python 3.13 binary (renamed)
+│   ├── libpython3.13.so          # Python shared library
+│   └── libpython3.so             # Convenience symlink (optional)
+├── assets/
+│   ├── python/
+│   │   └── lib/python3.13/       # Stdlib + site-packages (SymPy, mpmath)
+│   ├── sage_bridge.py            # Python bridge script
+│   └── tauri.conf.json
+└── ...
+```
+
+### Runtime flow
+
+1. First launch → `MainActivity.extractPythonAssets()` copies
+   `assets/python/` → `/data/user/0/com.sagemath.ui/files/python/`
+   and `assets/sage_bridge.py` → `.../files/sage_bridge.py`
+2. Writes `.solver_config.json` with `native_lib_dir`, `files_dir`, `cache_dir`
+3. `AndroidSageSolver` spawns:
+   ```
+   /data/app/<pkg>/lib/arm64/libpython_exec.so -u /data/.../files/sage_bridge.py
+   ```
+   with `PYTHONHOME`, `PYTHONPATH`, `LD_LIBRARY_PATH` environment variables
+4. Python outputs `{"status": "ready", "backend": "sympy"}` on stdout
+5. Rust sends JSON solve requests on stdin, reads JSON results from stdout
+
+
+## Prerequisites
+
+- macOS (Apple Silicon or Intel) or Linux x86_64
+- Android SDK (API 24+) with NDK 27.x
 - JDK 17
-- Rust + `aarch64-linux-android` target
-- CMake 3.16+
-- ~5 GB disk space for build artifacts
+- Rust with `aarch64-linux-android` target
+- Node.js + pnpm
+- ~2 GB disk space
 
-### Step 1: Cross-Compile C Libraries
+
+## Local Development
+
+### Step 1: Cross-compile Python 3.13 for Android
 
 ```bash
-# Set environment
 source scripts/android-sagemath/env-android.sh
 
-# Build all dependencies (or individually)
-./scripts/android-sagemath/build-all.sh --target aarch64
+PYTHON_VERSION=3.13.3
 
-# Individual builds if needed:
-# ./scripts/android-sagemath/build-gmp.sh
-# ./scripts/android-sagemath/build-mpfr.sh
-# ./scripts/android-sagemath/build-flint.sh
-# ./scripts/android-sagemath/build-pari.sh
-# ./scripts/android-sagemath/build-ntl.sh
+# Download source
+wget https://www.python.org/ftp/python/$PYTHON_VERSION/Python-$PYTHON_VERSION.tgz
+tar xf Python-$PYTHON_VERSION.tgz
+cd Python-$PYTHON_VERSION
+
+# Build host Python (needed for --with-build-python)
+mkdir -p build-host && cd build-host
+../configure --prefix="$(pwd)/prefix"
+make -j"$(nproc)" && make install
+HOST_PYTHON="$(pwd)/prefix/bin/python3.13"
+cd ..
+
+# Cross-compile for Android aarch64
+mkdir -p cross-build && cd cross-build
+../configure \
+  --host=aarch64-linux-android24 \
+  --build=$(uname -m)-$(uname -s | tr '[:upper:]' '[:lower:]')-gnu \
+  --with-build-python="$HOST_PYTHON" \
+  --enable-shared \
+  --without-ensurepip \
+  --prefix="$(pwd)/prefix" \
+  ac_cv_buggy_getaddrinfo=no \
+  ac_cv_file__dev_ptmx=yes \
+  ac_cv_file__dev_ptc=no
+make -j"$(nproc)"
+make install
 ```
 
-Output: `sagemath-android/install/aarch64-linux-android/{lib,include}/`
+Output: `Python-3.13.3/cross-build/prefix/` containing `bin/python3.13`,
+`lib/python3.13/` (stdlib), `lib/libpython3.13.so`.
 
-### Step 2: Cross-Compile Python
+### Step 2: Bundle into Android assets
 
 ```bash
-./scripts/android-sagemath/build-python.sh
+# Point to your cross-compiled prefix
+export CROSS_PREFIX="path/to/Python-3.13.3/cross-build/prefix"
+
+./scripts/bundle-android-python.sh
 ```
 
-This builds a host Python for bootstrapping, then cross-compiles CPython 3.12 for Android.
+This script:
+1. Copies the Python stdlib to a staging area, removing test/tkinter/idle bloat
+2. Installs SymPy + mpmath via `pip install --target`
+3. Patches mpmath to avoid `importlib.metadata` (unavailable on Android)
+4. Strips debug symbols from `.so` files using the NDK strip tool
+5. Copies Python binaries to `jniLibs/arm64-v8a/`
+6. Copies the stdlib + sage_bridge.py to `assets/`
 
-Output: `sagemath-android/install/aarch64-linux-android/lib/python3.12/`
+The script accepts these environment variables for customization:
 
-### Step 3: Install SageMath Python Packages
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PROJECT_ROOT` | Auto-detected from script location | Repository root |
+| `CROSS_PREFIX` | `$PROJECT_ROOT/sagemath-android/src/Python-3.13.3/cross-build/.../prefix` | Cross-compiled Python install prefix |
+| `NDK_STRIP` | Auto-detected from `NDK_HOME` or `ANDROID_HOME` | Path to `llvm-strip` |
 
-```bash
-./scripts/android-sagemath/build-sagemath.sh
-```
-
-Installs SymPy, mpmath, and SageMath's pure-Python modules into the cross-prefix.
-
-### Step 4: Bundle into APK
-
-The cross-compiled files must be included in the Android APK as assets and extracted at first launch.
-
-#### 4a. Create the asset bundle
-
-```bash
-cd sagemath-android/install/aarch64-linux-android
-tar czf ../sagemath-bundle.tar.gz \
-  lib/libpython3.12.a \
-  lib/python3.12/ \
-  bin/python3 \
-  lib/libgmp.a lib/libmpfr.a lib/libflint.a lib/libpari.a lib/libntl.a
-```
-
-#### 4b. Add to Android assets
-
-```bash
-mkdir -p src-tauri/gen/android/app/src/main/assets
-cp sagemath-android/install/sagemath-bundle.tar.gz \
-   src-tauri/gen/android/app/src/main/assets/
-
-# Also bundle sage_bridge.py
-cp src-tauri/sage_bridge.py \
-   src-tauri/gen/android/app/src/main/assets/
-```
-
-#### 4c. First-launch extraction (Kotlin)
-
-Add to `MainActivity.kt`:
-
-```kotlin
-private fun extractSageMathBundle() {
-    val targetDir = File(filesDir, "python")
-    if (targetDir.exists()) return  // Already extracted
-
-    val bundleStream = assets.open("sagemath-bundle.tar.gz")
-    // Extract tar.gz to targetDir
-    // Also copy sage_bridge.py to filesDir
-}
-```
-
-### Step 5: Build the APK
+### Step 3: Build and run
 
 ```bash
 export ANDROID_HOME="$HOME/Library/Android/sdk"
 export NDK_HOME="$ANDROID_HOME/ndk/27.0.12077973"
 export JAVA_HOME="/opt/homebrew/opt/openjdk@17"
 
+# Development
+pnpm tauri android dev
+
+# Release
 pnpm tauri android build --target aarch64
 ```
 
-## Runtime Flow
 
-1. App launches → `MainActivity.extractSageMathBundle()` runs on first start
-2. Bundle extracts to `/data/data/com.sagemath.ui/files/python/`
-3. `sage_bridge.py` copied to `/data/data/com.sagemath.ui/files/`
-4. Rust `AndroidSageSolver` spawns `/data/data/com.sagemath.ui/files/python/bin/python3 sage_bridge.py`
-5. JSON IPC over stdin/stdout (same protocol as desktop `LocalSageSolver`)
+## CI Build (GitHub Actions)
 
-## Known Issues & Workarounds
+The release workflow (`.github/workflows/release.yml`) automates the entire
+process:
+
+1. **Setup**: Installs NDK 27, JDK 17, Rust, Node.js, Python 3.13 (host)
+2. **Cross-compile**: Builds CPython 3.13.3 for `aarch64-linux-android24`
+   using the NDK toolchain (~5-10 minutes, cached between runs)
+3. **Bundle**: Runs `bundle-android-python.sh` with CI-appropriate paths
+4. **Sign** (optional): If `ANDROID_KEY_BASE64` secret is set, creates a
+   signed release APK using a keystore decoded from the secret
+5. **Build**: `pnpm tauri android build`
+
+### Required secrets (for signing)
+
+| Secret | Description |
+|--------|-------------|
+| `ANDROID_KEY_BASE64` | Base64-encoded `.jks` keystore file |
+| `ANDROID_KEY_ALIAS` | Key alias within the keystore |
+| `ANDROID_KEY_PASSWORD` | Password for both keystore and key |
+
+Generate a keystore:
+```bash
+keytool -genkey -v \
+  -keystore release-key.jks \
+  -keyalg RSA -keysize 2048 \
+  -validity 10000 \
+  -alias my-key-alias
+
+# Base64-encode for GitHub secret
+base64 -i release-key.jks | tr -d '\n'
+```
+
+### Cache
+
+The cross-compiled Python prefix is cached with key
+`android-python-3.13.3-aarch64-ndk27-<hash of bundle script>`.
+The cache invalidates when `bundle-android-python.sh` changes.
+
+
+## Troubleshooting
+
+### "Skipping asset: python" in logcat
+
+The `assets/python/` directory is missing from the APK. Run
+`bundle-android-python.sh` before building, or check that the
+cross-compiled prefix has `lib/python3.13/` and `bin/python3.13`.
+
+### Python starts but no "ready" signal
+
+Check `adb logcat -s python-stderr` for import errors. Common causes:
+- Missing SymPy in site-packages (re-run bundle script)
+- Wrong Python version in stdlib path (must be 3.13)
+- Corrupted extraction — clear app data and relaunch
 
 ### SIGALRM not available on Android
-`sage_bridge.py` uses `signal.alarm()` for computation timeouts. Android's bionic libc doesn't support `SIGALRM` reliably. The `AndroidSageSolver` handles timeouts on the Rust side (30s tokio timeout) instead.
 
-**Fix**: Modify `sage_bridge.py` to skip `signal.alarm()` when `sys.platform == 'linux'` and `/system/build.prop` exists (Android detection).
+`sage_bridge.py` uses `signal.alarm()` for computation timeouts, which is
+unreliable on Android's bionic libc. The `AndroidSageSolver` handles
+timeouts on the Rust side with a 30-second tokio timeout instead.
 
-### Cython Extensions
-SageMath's performance-critical C extensions (cysignals, sage.rings.*, sage.libs.*) require Cython cross-compilation, which is significantly more complex than pure-Python installation. The current setup runs in "degraded mode" using SymPy + mpmath for computation.
+### Slow on emulator
 
-**Future work**: Use `crossenv` or `python-for-android` recipes to build Cython extensions.
+ARM binaries run through translation on x86_64 emulators. SymPy import
+alone takes ~1s on native ARM but can take 30+ seconds under translation.
+Test on a real device when possible.
 
-### APK Size
-Full SageMath bundle with Python + all libraries: ~400-500 MB. Consider:
-- Stripping debug symbols: `$STRIP --strip-unneeded *.so`
-- Compressing assets (they're already gzipped)
-- Using Android App Bundle (AAB) for Play Store delivery
-- On-demand download of SageMath bundle after install
-
-### China Network Issues
-Build scripts use mirror URLs for downloads:
-- GMP/MPFR: `mirrors.tuna.tsinghua.edu.cn` (TUNA)
-- Python: `mirrors.huaweicloud.com`
-- Gradle: `mirrors.cloud.tencent.com`
-- Maven: Alibaba mirrors (already configured in `build.gradle.kts`)
 
 ## File Reference
 
 ```
-scripts/android-sagemath/
-├── env-android.sh          # Environment setup (source this first)
-├── build-all.sh            # Master orchestrator
-├── build-gmp.sh            # GMP 6.3.0
-├── build-mpfr.sh           # MPFR 4.2.1
-├── build-flint.sh          # FLINT 3.1.3
-├── build-pari.sh           # PARI/GP 2.17.3
-├── build-ntl.sh            # NTL 11.5.1
-├── build-python.sh         # CPython 3.12.8
-└── build-sagemath.sh       # SageMath Python packages
+scripts/
+├── bundle-android-python.sh       # Packages cross-compiled Python for APK
+└── android-sagemath/
+    ├── ANDROID_SAGEMATH.md        # This document
+    ├── env-android.sh             # NDK environment variables
+    ├── build-all.sh               # Full SageMath stack cross-compilation
+    ├── build-python.sh            # CPython cross-compilation (3.12, legacy)
+    ├── build-gmp.sh               # GMP 6.3.0
+    ├── build-mpfr.sh              # MPFR 4.2.1
+    ├── build-flint.sh             # FLINT 3.1.3
+    ├── build-pari.sh              # PARI/GP 2.17.3
+    ├── build-ntl.sh               # NTL 11.5.1
+    └── build-sagemath.sh          # SageMath Python packages
 
-src-tauri/src/solver/
-├── android.rs              # AndroidSageSolver (mobile)
-├── local.rs                # LocalSageSolver (desktop)
-├── subprocess.rs           # SubprocessSolver (backup)
-├── traits.rs               # Solver trait definition
-├── types.rs                # Shared types
-└── mod.rs                  # Conditional compilation routing
-```
-
-## Dependency Graph
-
-```
-GMP 6.3.0 ──┬──► MPFR 4.2.1 ──► FLINT 3.1.3
-             ├──► PARI/GP 2.17.3
-             └──► NTL 11.5.1
-
-Python 3.12.8 ──► SymPy 1.13.3
-                  mpmath 1.3.0
-                  SageMath pure-Python core
+src-tauri/
+├── sage_bridge.py                 # Python bridge (SymPy/SageMath → JSON)
+├── src/solver/
+│   ├── android.rs                 # AndroidSageSolver (spawns Python)
+│   ├── local.rs                   # LocalSageSolver (desktop variant)
+│   ├── traits.rs                  # Solver trait
+│   ├── types.rs                   # Shared types
+│   └── mod.rs                     # cfg-gated module routing
+└── gen/android/
+    └── app/src/main/
+        ├── java/.../MainActivity.kt   # Asset extraction on first launch
+        ├── assets/python/             # Bundled Python stdlib (generated)
+        └── jniLibs/arm64-v8a/         # Python .so binaries (generated)
 ```

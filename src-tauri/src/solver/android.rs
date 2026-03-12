@@ -10,6 +10,13 @@ use tokio::sync::Mutex;
 use tokio::time::{timeout, Duration};
 
 const IO_TIMEOUT: Duration = Duration::from_secs(30);
+const READY_TIMEOUT: Duration = Duration::from_secs(60);
+
+macro_rules! solver_log {
+    ($level:expr, $($arg:tt)*) => {
+        eprintln!("[solver:{}] {}", $level, format!($($arg)*));
+    };
+}
 
 struct EmbeddedPythonProcess {
     child: Child,
@@ -50,16 +57,28 @@ impl AndroidSageSolver {
         }
 
         if !self.python_binary.exists() {
-            return Err(format!("Python binary not found at {}", self.python_binary.display()));
+            let msg = format!("Python binary not found at {}", self.python_binary.display());
+            solver_log!("ERROR", "{}", msg);
+            return Err(msg);
         }
 
         if !self.bridge_script.exists() {
-            return Err(format!("Bridge script not found at {}", self.bridge_script.display()));
+            let msg = format!("Bridge script not found at {}", self.bridge_script.display());
+            solver_log!("ERROR", "{}", msg);
+            return Err(msg);
         }
 
         let stdlib = self.python_home.join("lib/python3.13");
         let site_packages = stdlib.join("site-packages");
         let python_path = format!("{}:{}", stdlib.display(), site_packages.display());
+
+        solver_log!("INFO",
+            "Starting Python: binary={}, script={}, home={}, path={}",
+            self.python_binary.display(),
+            self.bridge_script.display(),
+            self.python_home.display(),
+            python_path
+        );
 
         let mut child = Command::new(&self.python_binary)
             .arg("-u")
@@ -72,7 +91,13 @@ impl AndroidSageSolver {
             .env("LD_LIBRARY_PATH", self.native_lib_dir.to_str().unwrap_or(""))
             .env("PYTHONDONTWRITEBYTECODE", "1")
             .spawn()
-            .map_err(|e| format!("Failed to start Python: {}", e))?;
+            .map_err(|e| {
+                let msg = format!("Failed to start Python: {}", e);
+                solver_log!("ERROR", "{}", msg);
+                msg
+            })?;
+
+        solver_log!("INFO", "Python process spawned (pid={:?})", child.id());
 
         let stderr = child.stderr.take();
         if let Some(stderr) = stderr {
@@ -81,7 +106,7 @@ impl AndroidSageSolver {
                 let mut line = String::new();
                 while let Ok(n) = stderr_reader.read_line(&mut line).await {
                     if n == 0 { break; }
-                    eprint!("[python-stderr] {}", line);
+                    eprintln!("[python-stderr] {}", line.trim_end());
                     line.clear();
                 }
             });
@@ -97,23 +122,47 @@ impl AndroidSageSolver {
             reader,
         };
 
+        solver_log!("INFO", "Waiting for Python ready signal (timeout={}s)...", READY_TIMEOUT.as_secs());
         let mut ready_line = String::new();
-        match timeout(Duration::from_secs(15), proc.reader.read_line(&mut ready_line)).await {
+        match timeout(READY_TIMEOUT, proc.reader.read_line(&mut ready_line)).await {
             Ok(Ok(n)) if n > 0 => {
+                solver_log!("INFO", "Received from Python ({} bytes): {}", n, ready_line.trim());
                 if let Ok(ready) = serde_json::from_str::<serde_json::Value>(&ready_line) {
                     if ready.get("type").and_then(|t| t.as_str()) == Some("ready") {
                         let backend = ready.get("backend").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
                         let version = ready.get("version").and_then(|v| v.as_str()).map(|s| s.to_string());
+                        solver_log!("INFO", "Python ready: backend={}, version={:?}", backend, version);
                         *self.backend_info.lock().await = Some((backend, version));
                         *proc_guard = Some(proc);
                         return Ok(());
                     }
                 }
-                Err(format!("Unexpected ready message: {}", ready_line.trim()))
+                let msg = format!("Unexpected ready message: {}", ready_line.trim());
+                solver_log!("ERROR", "{}", msg);
+                let _ = proc.child.kill().await;
+                Err(msg)
             }
-            Ok(Ok(_)) => Err("Python process closed stdout immediately".to_string()),
-            Ok(Err(e)) => Err(format!("IO error reading ready: {}", e)),
-            Err(_) => Err("Timeout waiting for Python ready signal (15s)".to_string())
+            Ok(Ok(_)) => {
+                let msg = "Python process closed stdout immediately".to_string();
+                solver_log!("ERROR", "{}", msg);
+                let _ = proc.child.kill().await;
+                Err(msg)
+            }
+            Ok(Err(e)) => {
+                let msg = format!("IO error reading ready signal: {}", e);
+                solver_log!("ERROR", "{}", msg);
+                let _ = proc.child.kill().await;
+                Err(msg)
+            }
+            Err(_) => {
+                let msg = format!(
+                    "Timeout waiting for Python ready signal ({}s). Python may be slow to start on this device.",
+                    READY_TIMEOUT.as_secs()
+                );
+                solver_log!("ERROR", "{}", msg);
+                let _ = proc.child.kill().await;
+                Err(msg)
+            }
         }
     }
 
@@ -150,6 +199,7 @@ impl AndroidSageSolver {
             }
             Ok(Err(e)) => Err(format!("IO error: {}", e)),
             Err(_) => {
+                solver_log!("ERROR", "Computation timed out (30s), killing Python process");
                 if let Some(mut p) = proc_guard.take() {
                     let _ = p.child.kill().await;
                 }
@@ -226,7 +276,9 @@ impl Solver for AndroidSageSolver {
                 let proc = self.process.lock().await;
                 if proc.is_none() {
                     drop(proc);
-                    if let Err(_) = self.ensure_started().await {}
+                    if let Err(e) = self.ensure_started().await {
+                        solver_log!("ERROR", "Failed to start Python for status check: {}", e);
+                    }
                 }
             }
             let proc = self.process.lock().await;
@@ -235,8 +287,10 @@ impl Solver for AndroidSageSolver {
                 Some((b, v)) => (b.clone(), v.clone()),
                 None => ("unknown".to_string(), None),
             };
+            let connected = proc.is_some();
+            solver_log!("INFO", "Status: connected={}, backend={}, version={:?}", connected, backend_name, version);
             SolverStatus {
-                connected: proc.is_some(),
+                connected,
                 backend_name,
                 version,
             }

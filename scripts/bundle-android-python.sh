@@ -1,14 +1,30 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT_ROOT="/Users/tim/my_project/SageMathUI"
-CROSS_PREFIX="$PROJECT_ROOT/sagemath-android/src/Python-3.13.3/cross-build/aarch64-linux-android/prefix"
-NDK_STRIP="$HOME/Library/Android/sdk/ndk/27.0.12077973/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-strip"
+# All paths can be overridden via environment variables for CI compatibility.
+# Defaults point to the local development setup on macOS.
+PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+CROSS_PREFIX="${CROSS_PREFIX:-$PROJECT_ROOT/sagemath-android/src/Python-3.13.3/cross-build/aarch64-linux-android/prefix}"
+
+# Auto-detect NDK strip tool (CI = linux-x86_64, local = darwin-x86_64)
+if [ -z "${NDK_STRIP:-}" ]; then
+    NDK_ROOT="${NDK_HOME:-${ANDROID_HOME:-$HOME/Library/Android/sdk}/ndk/27.0.12077973}"
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        NDK_STRIP="$NDK_ROOT/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-strip"
+    else
+        NDK_STRIP="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+    fi
+fi
 
 ANDROID_APP="$PROJECT_ROOT/src-tauri/gen/android/app/src/main"
 ASSETS_DIR="$ANDROID_APP/assets"
 JNILIBS_DIR="$ANDROID_APP/jniLibs/arm64-v8a"
 STAGING="$PROJECT_ROOT/sagemath-android/staging"
+
+echo "PROJECT_ROOT: $PROJECT_ROOT"
+echo "CROSS_PREFIX: $CROSS_PREFIX"
+echo "NDK_STRIP:    $NDK_STRIP"
+echo ""
 
 echo "=== Step 1: Clean staging area ==="
 rm -rf "$STAGING"
@@ -70,9 +86,15 @@ find "$SITE_PACKAGES" -name "*.pyc" -delete 2>/dev/null || true
 rm -rf "$SITE_PACKAGES"/*.dist-info
 rm -rf "$SITE_PACKAGES/sympy/testing" "$SITE_PACKAGES/sympy/benchmarks"
 
-sed -i '' 's/^from importlib.metadata import version$/__version__ = "1.3.0"/' "$SITE_PACKAGES/mpmath/__init__.py"
-sed -i '' '/^__version__ = version(__name__)$/d' "$SITE_PACKAGES/mpmath/__init__.py"
-sed -i '' '/^del version$/d' "$SITE_PACKAGES/mpmath/__init__.py"
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    sed -i '' 's/^from importlib.metadata import version$/__version__ = "1.3.0"/' "$SITE_PACKAGES/mpmath/__init__.py"
+    sed -i '' '/^__version__ = version(__name__)$/d' "$SITE_PACKAGES/mpmath/__init__.py"
+    sed -i '' '/^del version$/d' "$SITE_PACKAGES/mpmath/__init__.py"
+else
+    sed -i 's/^from importlib.metadata import version$/__version__ = "1.3.0"/' "$SITE_PACKAGES/mpmath/__init__.py"
+    sed -i '/^__version__ = version(__name__)$/d' "$SITE_PACKAGES/mpmath/__init__.py"
+    sed -i '/^del version$/d' "$SITE_PACKAGES/mpmath/__init__.py"
+fi
 echo "  Patched mpmath __init__.py to hardcode version"
 
 SYMPY_SIZE=$(du -sh "$SITE_PACKAGES/sympy/" 2>/dev/null | cut -f1)
@@ -82,14 +104,16 @@ echo "  SymPy: $SYMPY_SIZE, mpmath: $MPMATH_SIZE"
 echo "=== Step 4: Strip and copy binaries to jniLibs ==="
 mkdir -p "$JNILIBS_DIR"
 
-cp "$CROSS_PREFIX/bin/python3.13" "$JNILIBS_DIR/libpython_exec.so"
-cp "$CROSS_PREFIX/lib/libpython3.13.so" "$JNILIBS_DIR/libpython3.13.so"
-cp "$CROSS_PREFIX/lib/libpython3.so" "$JNILIBS_DIR/libpython3.so"
+cp -L "$CROSS_PREFIX/bin/python3.13" "$JNILIBS_DIR/libpython_exec.so"
+cp -L "$CROSS_PREFIX/lib/libpython3.13.so" "$JNILIBS_DIR/libpython3.13.so"
+if [ -f "$CROSS_PREFIX/lib/libpython3.so" ]; then
+    cp -L "$CROSS_PREFIX/lib/libpython3.so" "$JNILIBS_DIR/libpython3.so"
+fi
 
 BEFORE_STRIP=$(du -sh "$JNILIBS_DIR" | cut -f1)
 "$NDK_STRIP" --strip-debug "$JNILIBS_DIR/libpython3.13.so"
 "$NDK_STRIP" --strip-unneeded "$JNILIBS_DIR/libpython_exec.so" 2>/dev/null || true
-"$NDK_STRIP" --strip-debug "$JNILIBS_DIR/libpython3.so" 2>/dev/null || true
+[ -f "$JNILIBS_DIR/libpython3.so" ] && "$NDK_STRIP" --strip-debug "$JNILIBS_DIR/libpython3.so" 2>/dev/null || true
 AFTER_STRIP=$(du -sh "$JNILIBS_DIR" | cut -f1)
 echo "  Before strip: $BEFORE_STRIP → After strip: $AFTER_STRIP"
 

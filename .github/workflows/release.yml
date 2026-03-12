@@ -134,10 +134,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            autoconf automake libtool texinfo \
-            cmake ninja-build pkg-config \
-            m4 perl python3 python3-pip
+          sudo apt-get install -y build-essential pkg-config
 
       - name: Setup JDK 17
         uses: actions/setup-java@v4
@@ -171,23 +168,59 @@ jobs:
         with:
           workspaces: "./src-tauri -> target"
 
-      - name: Cache SageMath cross-compilation
+      - name: Setup Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Cache Android Python
+        id: android-python-cache
         uses: actions/cache@v4
         with:
-          path: sagemath-android/install
-          key: sagemath-android-aarch64-${{ hashFiles('scripts/android-sagemath/*.sh') }}
+          path: android-python-prefix
+          key: android-python-3.13.3-aarch64-ndk27-${{ hashFiles('scripts/bundle-android-python.sh') }}
 
-      - name: Cross-compile SageMath stack
-        run: ./scripts/android-sagemath/build-all.sh --target aarch64
-        timeout-minutes: 90
-
-      - name: Bundle SageMath assets
+      - name: Cross-compile Python 3.13 for Android
+        if: steps.android-python-cache.outputs.cache-hit != 'true'
         run: |
-          PREFIX=sagemath-android/install/aarch64-linux-android
-          echo "=== Install prefix contents ==="
-          find "$PREFIX" -maxdepth 2 -type d || true
-          cd "$PREFIX"
-          tar czf ../../sagemath-bundle.tar.gz .
+          NDK=$ANDROID_SDK_ROOT/ndk/27.0.12077973
+          TOOLCHAIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64
+
+          export CC=$TOOLCHAIN/bin/aarch64-linux-android24-clang
+          export CXX=$TOOLCHAIN/bin/aarch64-linux-android24-clang++
+          export AR=$TOOLCHAIN/bin/llvm-ar
+          export STRIP=$TOOLCHAIN/bin/llvm-strip
+          export READELF=$TOOLCHAIN/bin/llvm-readelf
+          export CFLAGS="-O2 -fPIC"
+
+          wget -q https://www.python.org/ftp/python/3.13.3/Python-3.13.3.tgz
+          tar xf Python-3.13.3.tgz
+          cd Python-3.13.3
+
+          mkdir -p build-host && cd build-host
+          ../configure --prefix="$(pwd)/prefix" -q
+          make -j"$(nproc)" -s
+          make install -s
+          HOST_PYTHON="$(pwd)/prefix/bin/python3.13"
+          cd ..
+
+          mkdir -p cross-build && cd cross-build
+          ../configure \
+            --host=aarch64-linux-android24 \
+            --build=x86_64-linux-gnu \
+            --with-build-python="$HOST_PYTHON" \
+            --enable-shared \
+            --without-ensurepip \
+            --prefix="$(pwd)/prefix" \
+            ac_cv_buggy_getaddrinfo=no \
+            ac_cv_file__dev_ptmx=yes \
+            ac_cv_file__dev_ptc=no \
+            -q
+          make -j"$(nproc)" -s
+          make install -s
+
+          cp -a prefix "$GITHUB_WORKSPACE/android-python-prefix"
+        timeout-minutes: 30
 
       - name: Install frontend dependencies
         run: pnpm install
@@ -195,12 +228,12 @@ jobs:
       - name: Initialize Tauri Android project
         run: pnpm tauri android init
 
-      - name: Copy assets into APK
+      - name: Bundle Android Python assets
         run: |
-          ASSETS=src-tauri/gen/android/app/src/main/assets
-          mkdir -p "$ASSETS"
-          cp sagemath-android/sagemath-bundle.tar.gz "$ASSETS/"
-          cp src-tauri/sage_bridge.py "$ASSETS/"
+          export PROJECT_ROOT="$GITHUB_WORKSPACE"
+          export CROSS_PREFIX="$GITHUB_WORKSPACE/android-python-prefix"
+          export NDK_HOME="$ANDROID_SDK_ROOT/ndk/27.0.12077973"
+          ./scripts/bundle-android-python.sh
 
       - name: Setup Android signing
         if: env.ANDROID_KEY_BASE64 != ''
