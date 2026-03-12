@@ -21,6 +21,23 @@ export interface SolverStatus {
   version: string | null;
 }
 
+export interface DebugPathEntry {
+  name: string;
+  path: string;
+  exists: boolean;
+}
+
+export interface DebugInfo {
+  paths: DebugPathEntry[];
+  solver_status: SolverStatus;
+  python_stderr: string[];
+  startup_error: string | null;
+  lib_dynload_files: string[];
+  stdlib_entries: string[];
+  config_json: string | null;
+  extra_info: string[];
+}
+
 export const useSolverStore = defineStore('solver', () => {
   // State
   const latex = ref('');
@@ -30,6 +47,7 @@ export const useSolverStore = defineStore('solver', () => {
   const error = ref<string | null>(null);
   const showSteps = ref(false);
   const solverStatus = ref<SolverStatus | null>(null);
+  const debugInfo = ref<DebugInfo | null>(null);
 
   // Actions
   async function solveMath(operation: string = 'solve', variable?: string) {
@@ -98,6 +116,18 @@ export const useSolverStore = defineStore('solver', () => {
     }
   }
 
+  async function getDebugInfo() {
+    try {
+      const info = await invoke<DebugInfo>('get_debug_info');
+      debugInfo.value = info;
+      return info;
+    } catch (err) {
+      console.error('Debug info error:', err);
+      debugInfo.value = null;
+      return null;
+    }
+  }
+
   return {
     // State
     latex,
@@ -107,11 +137,13 @@ export const useSolverStore = defineStore('solver', () => {
     error,
     showSteps,
     solverStatus,
+    debugInfo,
     // Actions
     solveMath,
     toggleSteps,
     clearResult,
     checkStatus,
     shutdownSolver,
+    getDebugInfo,
   };
 });

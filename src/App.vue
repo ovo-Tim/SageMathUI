@@ -9,6 +9,8 @@ import { useSolverStore } from './stores/solver';
 const solver = useSolverStore();
 const statusChecking = ref(true);  // Start as "checking" (yellow dot)
 const showStatusPopup = ref(false);
+const showDebugPanel = ref(false);
+const debugLoading = ref(false);
 
 function handleSolve() {
   if (solver.latex.trim()) {
@@ -31,6 +33,13 @@ async function handleStatusCheck() {
   setTimeout(() => {
     showStatusPopup.value = false;
   }, 4000);
+}
+
+async function handleOpenDebug() {
+  showDebugPanel.value = true;
+  debugLoading.value = true;
+  await solver.getDebugInfo();
+  debugLoading.value = false;
 }
 
 onMounted(async () => {
@@ -81,12 +90,21 @@ onMounted(async () => {
         </transition>
       </button>
       <h1 class="header-title">Calculator</h1>
-      <button class="icon-button" aria-label="History">
-        <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="10"></circle>
-          <polyline points="12 6 12 12 16 14"></polyline>
-        </svg>
-      </button>
+      <div class="header-actions">
+        <button class="icon-button" aria-label="Debug Info" @click="handleOpenDebug">
+          <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2a4 4 0 0 0-4 4v2H6a2 2 0 0 0-2 2v1h4m12-1a2 2 0 0 0-2-2h-2V6a4 4 0 0 0-4-4"></path>
+            <rect x="8" y="10" width="8" height="10" rx="4"></rect>
+            <path d="M4 14h4M16 14h4M4 18h4M16 18h4M9 10V8M15 10V8"></path>
+          </svg>
+        </button>
+        <button class="icon-button" aria-label="History">
+          <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <polyline points="12 6 12 12 16 14"></polyline>
+          </svg>
+        </button>
+      </div>
     </header>
 
     <!-- Main Content -->
@@ -129,6 +147,83 @@ onMounted(async () => {
     <footer class="app-keyboard">
       <MathKeyboard />
     </footer>
+
+    <!-- Debug Panel Overlay -->
+    <transition name="debug-slide">
+      <div v-if="showDebugPanel" class="debug-overlay">
+        <div class="debug-header">
+          <h2 class="debug-title">Debug Info</h2>
+          <button class="debug-close" @click="showDebugPanel = false">&times;</button>
+        </div>
+        <div class="debug-content">
+          <template v-if="debugLoading">
+            <p class="debug-loading">Loading diagnostics...</p>
+          </template>
+          <template v-else-if="solver.debugInfo">
+            <section class="debug-section">
+              <h3>Solver Status</h3>
+              <div class="debug-kv">
+                <span>Connected:</span>
+                <span :class="solver.debugInfo.solver_status.connected ? 'val-ok' : 'val-err'">
+                  {{ solver.debugInfo.solver_status.connected }}
+                </span>
+              </div>
+              <div class="debug-kv">
+                <span>Backend:</span>
+                <span>{{ solver.debugInfo.solver_status.backend_name }}</span>
+              </div>
+              <div class="debug-kv">
+                <span>Version:</span>
+                <span>{{ solver.debugInfo.solver_status.version ?? 'N/A' }}</span>
+              </div>
+            </section>
+
+            <section v-if="solver.debugInfo.startup_error" class="debug-section">
+              <h3>Startup Error</h3>
+              <pre class="debug-pre debug-error">{{ solver.debugInfo.startup_error }}</pre>
+            </section>
+
+            <section class="debug-section">
+              <h3>Paths</h3>
+              <div v-for="p in solver.debugInfo.paths" :key="p.name" class="debug-kv">
+                <span>{{ p.name }}:</span>
+                <span :class="p.exists ? 'val-ok' : 'val-err'">
+                  {{ p.exists ? '✓' : '✗' }} {{ p.path }}
+                </span>
+              </div>
+            </section>
+
+            <section class="debug-section">
+              <h3>lib-dynload/ ({{ solver.debugInfo.lib_dynload_files.length }} files)</h3>
+              <pre class="debug-pre">{{ solver.debugInfo.lib_dynload_files.join('\n') }}</pre>
+            </section>
+
+            <section class="debug-section">
+              <h3>stdlib entries ({{ solver.debugInfo.stdlib_entries.length }})</h3>
+              <pre class="debug-pre">{{ solver.debugInfo.stdlib_entries.join('\n') }}</pre>
+            </section>
+
+            <section v-if="solver.debugInfo.python_stderr.length" class="debug-section">
+              <h3>Python stderr ({{ solver.debugInfo.python_stderr.length }} lines)</h3>
+              <pre class="debug-pre">{{ solver.debugInfo.python_stderr.join('\n') }}</pre>
+            </section>
+
+            <section v-if="solver.debugInfo.config_json" class="debug-section">
+              <h3>Config JSON</h3>
+              <pre class="debug-pre">{{ solver.debugInfo.config_json }}</pre>
+            </section>
+
+            <section v-if="solver.debugInfo.extra_info.length" class="debug-section">
+              <h3>Environment</h3>
+              <pre class="debug-pre">{{ solver.debugInfo.extra_info.join('\n') }}</pre>
+            </section>
+          </template>
+          <template v-else>
+            <p class="debug-loading">No debug info available.</p>
+          </template>
+        </div>
+      </div>
+    </transition>
   </div>
 </template>
 
@@ -383,5 +478,134 @@ onMounted(async () => {
   box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.08);
   z-index: 10;
   /* Height is set dynamically by MathKeyboard via geometrychange event */
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+/* Debug panel */
+.debug-overlay {
+  position: fixed;
+  inset: 0;
+  background: #111;
+  color: #e0e0e0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-ui);
+}
+
+.debug-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: #1a1a1a;
+  border-bottom: 1px solid #333;
+  flex-shrink: 0;
+}
+
+.debug-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+  color: #fff;
+}
+
+.debug-close {
+  background: none;
+  border: none;
+  color: #999;
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.debug-close:hover {
+  color: #fff;
+}
+
+.debug-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.debug-section {
+  margin-bottom: 20px;
+}
+
+.debug-section h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: #8ab4f8;
+  margin: 0 0 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.debug-kv {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.8;
+  font-family: ui-monospace, 'SF Mono', monospace;
+  word-break: break-all;
+}
+
+.debug-kv > span:first-child {
+  color: #999;
+  flex-shrink: 0;
+}
+
+.val-ok {
+  color: #4ade80;
+}
+
+.val-err {
+  color: #f87171;
+}
+
+.debug-pre {
+  background: #1e1e1e;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: ui-monospace, 'SF Mono', monospace;
+  color: #ccc;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.debug-pre.debug-error {
+  border-color: #f87171;
+  color: #fca5a5;
+}
+
+.debug-loading {
+  color: #999;
+  font-size: 14px;
+  text-align: center;
+  padding: 40px 0;
+}
+
+.debug-slide-enter-active,
+.debug-slide-leave-active {
+  transition: transform 0.25s ease;
+}
+
+.debug-slide-enter-from,
+.debug-slide-leave-to {
+  transform: translateY(100%);
 }
 </style>

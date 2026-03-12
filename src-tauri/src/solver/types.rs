@@ -54,3 +54,32 @@ pub struct SolverStatus {
     pub backend_name: String,
     pub version: Option<String>,
 }
+
+/// A single path entry for debug info
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DebugPathEntry {
+    pub name: String,
+    pub path: String,
+    pub exists: bool,
+}
+
+/// Debug information for diagnosing Android issues
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DebugInfo {
+    /// Key paths and whether they exist
+    pub paths: Vec<DebugPathEntry>,
+    /// Current solver status
+    pub solver_status: SolverStatus,
+    /// Captured Python stderr lines (last N lines)
+    pub python_stderr: Vec<String>,
+    /// Startup error if Python failed to start
+    pub startup_error: Option<String>,
+    /// Files in lib-dynload/ directory
+    pub lib_dynload_files: Vec<String>,
+    /// Top-level entries in python/lib/python3.13/
+    pub stdlib_entries: Vec<String>,
+    /// Raw config JSON that was read
+    pub config_json: Option<String>,
+    /// Device/environment info
+    pub extra_info: Vec<String>,
+}

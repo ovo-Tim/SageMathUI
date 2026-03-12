@@ -4,7 +4,7 @@ mod solver;
 use solver::LocalSageSolver;
 #[cfg(target_os = "android")]
 use solver::AndroidSageSolver;
-use solver::{OperationType, Solver, SolverRequest, SolverResponse, SolverStatus};
+use solver::{OperationType, Solver, SolverRequest, SolverResponse, SolverStatus, DebugInfo};
 use std::sync::Arc;
 use tauri::Manager;
 use tokio::sync::Mutex;
@@ -14,6 +14,8 @@ pub struct SolverState {
     solver: Arc<Mutex<LocalSageSolver>>,
     #[cfg(target_os = "android")]
     solver: Arc<Mutex<AndroidSageSolver>>,
+    #[cfg(target_os = "android")]
+    config_json: String,
 }
 
 impl SolverState {
@@ -30,6 +32,7 @@ impl SolverState {
         python_home: std::path::PathBuf,
         bridge_script: std::path::PathBuf,
         native_lib_dir: std::path::PathBuf,
+        config_json: String,
     ) -> Self {
         Self {
             solver: Arc::new(Mutex::new(AndroidSageSolver::new(
@@ -38,6 +41,7 @@ impl SolverState {
                 bridge_script,
                 native_lib_dir,
             ))),
+            config_json,
         }
     }
 }
@@ -83,6 +87,32 @@ async fn shutdown_solver(state: tauri::State<'_, SolverState>) -> Result<String,
     let solver = state.solver.lock().await;
     solver.shutdown().await;
     Ok("Solver shut down".to_string())
+}
+
+#[tauri::command]
+async fn get_debug_info(state: tauri::State<'_, SolverState>) -> Result<DebugInfo, String> {
+    #[cfg(target_os = "android")]
+    {
+        let solver = state.solver.lock().await;
+        let mut info = solver.debug_info().await;
+        info.config_json = Some(state.config_json.clone());
+        Ok(info)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let solver = state.solver.lock().await;
+        let status = solver.status().await;
+        Ok(DebugInfo {
+            paths: vec![],
+            solver_status: status,
+            python_stderr: vec![],
+            startup_error: None,
+            lib_dynload_files: vec![],
+            stdlib_entries: vec![],
+            config_json: None,
+            extra_info: vec!["Desktop build — debug info is Android-only".into()],
+        })
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -132,6 +162,7 @@ pub fn run() {
                     python_home,
                     bridge_script,
                     native_lib_dir,
+                    config_str.clone(),
                 ));
             }
             Ok(())
@@ -139,7 +170,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             solve_math,
             get_solver_status,
-            shutdown_solver
+            shutdown_solver,
+            get_debug_info
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
