@@ -209,21 +209,7 @@ jobs:
           mkdir -p cross-build && cd cross-build
 
           # Disable C extension modules that need system libraries not in NDK
-          cat > ../Modules/Setup.local << 'SETUP'
-          *disabled*
-          _lzma
-          _bz2
-          _ssl
-          _hashlib
-          readline
-          _curses
-          _curses_panel
-          _sqlite3
-          _uuid
-          _ctypes
-          _posixshmem
-          _blake2
-          SETUP
+          printf '%s\n' '*disabled*' _lzma _bz2 _ssl _hashlib readline _curses _curses_panel _sqlite3 _uuid _ctypes _posixshmem _blake2 > ../Modules/Setup.local
 
           ../configure \
             --host=aarch64-linux-android24 \
