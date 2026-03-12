@@ -213,12 +213,20 @@ jobs:
             --with-build-python="$HOST_PYTHON" \
             --enable-shared \
             --without-ensurepip \
+            --without-lzma \
+            --without-readline \
+            --without-doc-strings \
+            --disable-test-modules \
             --prefix="$(pwd)/prefix" \
             ac_cv_buggy_getaddrinfo=no \
             ac_cv_file__dev_ptmx=yes \
             ac_cv_file__dev_ptc=no \
             -q
-          make -j"$(nproc)" -s
+          make -j"$(nproc)" -s 2>&1 || {
+            echo "=== Cross-build failed. Checking for missing modules ==="
+            cat config.log | grep -i "error\|cannot find\|not found" | tail -30
+            exit 1
+          }
           make install -s
 
           cp -a prefix "$GITHUB_WORKSPACE/android-python-prefix"
