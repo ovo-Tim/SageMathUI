@@ -231,16 +231,95 @@ def _latex_safe(expr):
 # ── LaTeX parser ─────────────────────────────────────────────────────────────
 
 
-def _replace_sqrt(m):
-    """Replace \\sqrt[n]{...} or \\sqrt{...} with (expr)**(1/n) or (expr)**(1/2)."""
-    idx = m.group(1)
-    radicand = m.group(2)
-    if idx:
-        return f"(({radicand})**(1/({idx})))"
+_BARE_FN_NAMES = [
+    "arcsin",
+    "arccos",
+    "arctan",
+    "sinh",
+    "cosh",
+    "tanh",
+    "sin",
+    "cos",
+    "tan",
+    "cot",
+    "sec",
+    "csc",
+    "log",
+    "exp",
+    "ln",
+]
+_RE_BARE_FN = re.compile(r"(" + "|".join(re.escape(fn) for fn in _BARE_FN_NAMES) + r")")
+_RE_OPERATORNAME = re.compile(r"\\operatorname\{(\w+)\}")
+
+_RE_DERIVATIVE_1 = re.compile(r"\\frac\{d\}\{d([a-zA-Z])\}\s*(.+)")
+_RE_DERIVATIVE_N = re.compile(
+    r"\\frac\{d\^\{?(\d+)\}?\}\{d([a-zA-Z])\^\{?\d+\}?\}\s*(.+)"
+)
+
+_RE_DEF_INTEGRAL = re.compile(
+    r"\\int_\{([^{}]+)\}\^\{([^{}]+)\}\s*(.+?)\\?[,;]?\s*d([a-zA-Z])"
+)
+_RE_INDEF_INTEGRAL = re.compile(r"\\int\s*(.+?)\\?[,;]?\s*d([a-zA-Z])")
+_RE_LIMIT = re.compile(r"\\lim_\{([a-zA-Z])\s*\\to\s*([^{}]+)\}\s*(.+)")
+_RE_SUM = re.compile(r"\\sum_\{([a-zA-Z])=([^{}]+)\}\^\{([^{}]+)\}\s*(.+)")
+
+_RE_FRAC = re.compile(r"\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}")
+_RE_SQRT_INDEXED = re.compile(r"\\sqrt\[([^\]]+)\]\{([^{}]+)\}")
+_RE_SQRT = re.compile(r"\\sqrt\{([^{}]+)\}")
+_RE_SUPERSCRIPT_BRACED = re.compile(r"\^\{([^{}]+)\}")
+_RE_SUBSCRIPT_BRACED = re.compile(r"_\{([^{}]+)\}")
+
+_FN_MAP = {
+    r"\arcsin": "arcsin",
+    r"\arccos": "arccos",
+    r"\arctan": "arctan",
+    r"\sinh": "sinh",
+    r"\cosh": "cosh",
+    r"\tanh": "tanh",
+    r"\sin": "sin",
+    r"\cos": "cos",
+    r"\tan": "tan",
+    r"\cot": "cot",
+    r"\sec": "sec",
+    r"\csc": "csc",
+    r"\log": "log",
+    r"\ln": "log",
+    r"\exp": "exp",
+    r"\abs": "abs",
+}
+
+_RE_NUM_TIMES_SYMBOL = re.compile(r"(\d)(pi|oo|[a-zA-Z])")
+_RE_PAREN_TIMES_WORD = re.compile(r"\)\s*(\w)")
+_RE_MATRIX_BLOCK = re.compile(
+    r"\\begin\{([pbvBV]?)matrix\}(.+?)\\end\{[pbvBV]?matrix\}"
+)
+_RE_ADJACENT_MATRIX = re.compile(r"\)(matrix|Matrix)\(")
+_RE_WHITESPACE = re.compile(r"\s+")
+_RE_FINAL_NUM_TIMES = re.compile(r"(\d)([a-zA-Z(])")
+_RE_FINAL_ADJACENT_PARENS = re.compile(r"\)\(")
+_KFN_NO_SCT = (
+    "integrate|integral|summation|limit|diff|sqrt|"
+    "arcsin|arccos|arctan|sinh|cosh|tanh|"
+    "cot|sec|csc|log|exp|abs"
+)
+_RE_FINAL_KNOWN_FN = re.compile(r"([a-zA-Z0-9])(" + _KFN_NO_SCT + r")\(")
+_RE_FINAL_SCT_FN = re.compile(r"([a-zA-Z0-9])(?<!arc)((?:sin|cos|tan)\()")
+_RE_FINAL_LETTER_PAREN = re.compile(r"(?<![a-zA-Z])([a-zA-Z])\(")
+
+
+def _sqrt_to_power(radicand: str, index: str | None = None) -> str:
+    """Convert sqrt forms to fractional-power syntax."""
+    if index:
+        return f"(({radicand})**(1/({index})))"
     return f"(({radicand})**(1/2))"
 
 
-def _replace_matrix(m):
+def _replace_sqrt(m: re.Match[str]) -> str:
+    """Replace indexed sqrt regex matches using _sqrt_to_power()."""
+    return _sqrt_to_power(m.group(2), m.group(1))
+
+
+def _replace_matrix(m: re.Match[str]) -> str:
     """Convert \\begin{pmatrix}a&b\\\\c&d\\end{pmatrix} → matrix([[a,b],[c,d]]).
 
     For \\begin{vmatrix} (determinant notation), wraps with .det().
@@ -262,7 +341,143 @@ def _replace_matrix(m):
     return mat_expr
 
 
-def parse_latex_to_expr(latex_str):
+def _normalize_bare_functions(s: str) -> str:
+    """Normalize bare function names by adding a leading backslash."""
+    placeholders = {}
+    for i, fn in enumerate(_BARE_FN_NAMES):
+        ph = f"__FN{i}__"
+        placeholders[ph] = "\\" + fn
+        s = s.replace("\\" + fn, ph)
+
+    s = _RE_BARE_FN.sub(r"\\\1", s)
+
+    for ph, original in placeholders.items():
+        s = s.replace(ph, original)
+    return s
+
+
+def _strip_display_wrappers(s: str) -> str:
+    """Remove display-only wrappers and normalize arithmetic operators."""
+    for wrap in [r"\displaystyle", r"\left", r"\right", r"\!", r"\quad", r"\qquad"]:
+        s = s.replace(wrap, "")
+    s = s.replace(r"\cdot", "*").replace(r"\times", "*").replace(r"\div", "/")
+    s = s.replace(r"\pm", "+")
+    return s
+
+
+def _convert_derivatives(s: str) -> str:
+    """Convert LaTeX derivative fractions into diff() syntax."""
+    s = _RE_DERIVATIVE_1.sub(r"diff(\2, \1)", s)
+    s = _RE_DERIVATIVE_N.sub(r"diff(\3, \2, \1)", s)
+    return s
+
+
+def _convert_integrals(s: str) -> str:
+    """Convert LaTeX integrals into backend-appropriate calls."""
+    if SAGE_AVAILABLE:
+        s = _RE_DEF_INTEGRAL.sub(r"integral(\3, \4, \1, \2)", s)
+        s = _RE_INDEF_INTEGRAL.sub(r"integral(\1, \2)", s)
+    else:
+        s = _RE_DEF_INTEGRAL.sub(r"integrate(\3, (\4, \1, \2))", s)
+        s = _RE_INDEF_INTEGRAL.sub(r"integrate(\1, \2)", s)
+    return s
+
+
+def _convert_limits(s: str) -> str:
+    """Convert LaTeX limits into backend-appropriate limit() syntax."""
+    if SAGE_AVAILABLE:
+        return _RE_LIMIT.sub(r"limit(\3, \1=\2)", s)
+    return _RE_LIMIT.sub(r"limit(\3, \1, \2)", s)
+
+
+def _convert_sums(s: str) -> str:
+    """Convert LaTeX summations into backend-appropriate sum calls."""
+    if SAGE_AVAILABLE:
+        return _RE_SUM.sub(r"sum(\4, \1, \2, \3)", s)
+    return _RE_SUM.sub(r"summation(\4, (\1, \2, \3))", s)
+
+
+def _strip_thin_spaces(s: str) -> str:
+    """Strip thin-space markers after calculus conversions."""
+    return s.replace(r"\,", "").replace(r"\;", "")
+
+
+def _convert_fractions(s: str) -> str:
+    """Convert nested \\frac{a}{b} forms into ((a)/(b))."""
+    for _ in range(10):
+        new = _RE_FRAC.sub(r"((\1)/(\2))", s)
+        if new == s:
+            break
+        s = new
+    return s
+
+
+def _convert_roots(s: str) -> str:
+    """Convert square roots and n-th roots to power notation."""
+    s = _RE_SQRT_INDEXED.sub(_replace_sqrt, s)
+    s = _RE_SQRT.sub(lambda m: _sqrt_to_power(m.group(1)), s)
+    return s
+
+
+def _convert_superscripts(s: str) -> str:
+    """Convert LaTeX superscripts into Python exponent syntax."""
+    s = _RE_SUPERSCRIPT_BRACED.sub(r"**(\1)", s)
+    return s.replace("^", "**")
+
+
+def _convert_subscripts(s: str) -> str:
+    """Drop subscript wrappers by unwrapping _{...} to ..."""
+    return _RE_SUBSCRIPT_BRACED.sub(r"\1", s)
+
+
+def _convert_functions(s: str) -> str:
+    """Convert LaTeX function commands, including function-power notation."""
+    for tex, py in _FN_MAP.items():
+        esc = re.escape(tex)
+        s = re.sub(esc + r"\*\*\(([^()]*)\)\{([^{}]*)\}", py + r"(\2)**(\1)", s)
+        s = re.sub(esc + r"\*\*\(([^()]*)\)\s*([a-zA-Z0-9])", py + r"(\2)**(\1)", s)
+        s = re.sub(esc + r"\*\*([0-9]+)\s*([a-zA-Z0-9])", py + r"(\2)**\1", s)
+
+    for tex, py in _FN_MAP.items():
+        s = re.sub(re.escape(tex) + r"\{([^{}]*)\}", py + r"(\1)", s)
+        s = re.sub(re.escape(tex) + r"\(", py + "(", s)
+        s = re.sub(re.escape(tex) + r"\s*(\\[a-zA-Z]+)", py + r"(\1)", s)
+        s = re.sub(re.escape(tex) + r"\s*([a-zA-Z0-9])", py + r"(\1)", s)
+        s = s.replace(tex, py)
+    return s
+
+
+def _convert_constants(s: str) -> str:
+    """Convert selected LaTeX constants into CAS-friendly names."""
+    return s.replace(r"\infty", "oo").replace(r"\pi", "pi")
+
+
+def _apply_implicit_multiplication(s: str) -> str:
+    """Apply early implicit multiplication rules before matrix conversion."""
+    s = _RE_NUM_TIMES_SYMBOL.sub(r"\1*\2", s)
+    return _RE_PAREN_TIMES_WORD.sub(r")*\1", s)
+
+
+def _convert_matrices(s: str) -> str:
+    """Convert matrix LaTeX environments to matrix()/Matrix() expressions."""
+    s = _RE_MATRIX_BLOCK.sub(_replace_matrix, s)
+    return _RE_ADJACENT_MATRIX.sub(r")*\1(", s)
+
+
+def _cleanup(s: str) -> str:
+    """Finalize brace normalization, whitespace cleanup, and implicit multiplication."""
+    s = s.replace("{", "(").replace("}", ")")
+    s = _RE_WHITESPACE.sub(" ", s).strip()
+
+    s = _RE_FINAL_NUM_TIMES.sub(r"\1*\2", s)
+    s = _RE_FINAL_ADJACENT_PARENS.sub(r")*(", s)
+    s = _RE_FINAL_KNOWN_FN.sub(r"\1*\2(", s)
+    s = _RE_FINAL_SCT_FN.sub(r"\1*\2", s)
+    s = _RE_FINAL_LETTER_PAREN.sub(r"\1*(", s)
+    return s
+
+
+def parse_latex_to_expr(latex_str: str) -> str:
     """Parse a LaTeX math string into a CAS-compatible expression string.
 
     Uses ** for exponents (works with both SageMath and SymPy).
@@ -283,228 +498,25 @@ def parse_latex_to_expr(latex_str):
     if not s:
         return ""
 
-    # 0. Normalize bare function names: sin → \sin, cos → \cos, etc.
-    #    MathLive sometimes outputs bare names without backslash.
-    #    Sorted longest-first so "sinh" matches before "sin", "arcsin" before "sin".
-    _BARE_FN_NAMES = sorted(
-        [
-            "sinh",
-            "cosh",
-            "tanh",
-            "arcsin",
-            "arccos",
-            "arctan",
-            "sin",
-            "cos",
-            "tan",
-            "cot",
-            "sec",
-            "csc",
-            "log",
-            "exp",
-            "ln",
-        ],
-        key=len,
-        reverse=True,
-    )
-    _BARE_FN_PAT = "|".join(re.escape(fn) for fn in _BARE_FN_NAMES)
+    # 0a. Convert \operatorname{fn} → \fn (MathLive sometimes uses this form)
+    s = _RE_OPERATORNAME.sub(r"\\\1", s)
 
-    # First, protect existing \-prefixed function names so "sin" inside "\arcsin"
-    # isn't matched as a bare function. Process longest-first to avoid
-    # "\arcsin" being partially replaced by "\sin" protection.
-    _placeholders = {}
-    for i, fn in enumerate(_BARE_FN_NAMES):
-        ph = f"__FN{i}__"
-        _placeholders[ph] = "\\" + fn
-        s = s.replace("\\" + fn, ph)
-
-    # Now match truly bare function names (no backslash prefix)
-    s = re.sub(r"(" + _BARE_FN_PAT + r")", r"\\\1", s)
-
-    # Restore protected names
-    for ph, original in _placeholders.items():
-        s = s.replace(ph, original)
-
-    # 1. Remove display wrappers (keep \, and \; for integral dx detection)
-    for wrap in [r"\displaystyle", r"\left", r"\right", r"\!", r"\quad", r"\qquad"]:
-        s = s.replace(wrap, "")
-    s = s.replace(r"\cdot", "*").replace(r"\times", "*")
-    s = s.replace(r"\pm", "+")
-
-    # 2. Derivatives: \frac{d}{dx} expr (BEFORE general fractions)
-    s = re.sub(r"\\frac\{d\}\{d([a-zA-Z])\}\s*(.+)", r"diff(\2, \1)", s)
-    s = re.sub(
-        r"\\frac\{d\^\{?(\d+)\}?\}\{d([a-zA-Z])\^\{?\d+\}?\}\s*(.+)",
-        r"diff(\3, \2, \1)",
-        s,
-    )
-
-    # 3. Integrals (BEFORE functions — need raw \sin, \, and dx boundary)
-    # Definite integral: \int_{a}^{b} expr \, dx
-    if SAGE_AVAILABLE:
-        s = re.sub(
-            r"\\int_\{([^{}]+)\}\^\{([^{}]+)\}\s*(.+?)\\?[,;]?\s*d([a-zA-Z])",
-            r"integral(\3, \4, \1, \2)",
-            s,
-        )
-    else:
-        s = re.sub(
-            r"\\int_\{([^{}]+)\}\^\{([^{}]+)\}\s*(.+?)\\?[,;]?\s*d([a-zA-Z])",
-            r"integrate(\3, (\4, \1, \2))",
-            s,
-        )
-    # Indefinite integral: \int expr \, dx (allow \s* after \int)
-    if SAGE_AVAILABLE:
-        s = re.sub(r"\\int\s*(.+?)\\?[,;]?\s*d([a-zA-Z])", r"integral(\1, \2)", s)
-    else:
-        s = re.sub(r"\\int\s*(.+?)\\?[,;]?\s*d([a-zA-Z])", r"integrate(\1, \2)", s)
-
-    # Limit: \lim_{x \to a} expr
-    if SAGE_AVAILABLE:
-        s = re.sub(
-            r"\\lim_\{([a-zA-Z])\s*\\to\s*([^{}]+)\}\s*(.+)", r"limit(\3, \1=\2)", s
-        )
-    else:
-        s = re.sub(
-            r"\\lim_\{([a-zA-Z])\s*\\to\s*([^{}]+)\}\s*(.+)", r"limit(\3, \1, \2)", s
-        )
-
-    # Sum: \sum_{i=a}^{b} expr
-    if SAGE_AVAILABLE:
-        s = re.sub(
-            r"\\sum_\{([a-zA-Z])=([^{}]+)\}\^\{([^{}]+)\}\s*(.+)",
-            r"sum(\4, \1, \2, \3)",
-            s,
-        )
-    else:
-        s = re.sub(
-            r"\\sum_\{([a-zA-Z])=([^{}]+)\}\^\{([^{}]+)\}\s*(.+)",
-            r"summation(\4, (\1, \2, \3))",
-            s,
-        )
-
-    # 4. Strip thin spaces (no longer needed after integral matching)
-    s = s.replace(r"\,", "").replace(r"\;", "")
-
-    # 5. General fractions: \frac{a}{b} → ((a)/(b))
-    frac_re = re.compile(r"\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}")
-    for _ in range(10):
-        new = frac_re.sub(r"((\1)/(\2))", s)
-        if new == s:
-            break
-        s = new
-
-    # Roots: \sqrt[n]{...} and \sqrt{...}
-    s = re.sub(r"\\sqrt\[([^\]]+)\]\{([^{}]+)\}", _replace_sqrt, s)
-    s = re.sub(
-        r"\\sqrt\{([^{}]+)\}",
-        lambda m: _replace_sqrt(
-            type("M", (), {"group": lambda self, i: {1: None, 2: m.group(1)}[i]})()
-        ),
-        s,
-    )
-
-    # 6. Superscripts: ^{...} → **(...) and bare ^ → **
-    s = re.sub(r"\^\{([^{}]+)\}", r"**(\1)", s)
-    s = s.replace("^", "**")
-
-    # Subscripts: just remove _{...}
-    s = re.sub(r"_\{([^{}]+)\}", r"\1", s)
-
-    # 7. Function names — ORDERED LONGEST-FIRST so \sinh is processed before \sin
-    fn_map = {
-        r"\arcsin": "arcsin",
-        r"\arccos": "arccos",
-        r"\arctan": "arctan",
-        r"\sinh": "sinh",
-        r"\cosh": "cosh",
-        r"\tanh": "tanh",
-        r"\sin": "sin",
-        r"\cos": "cos",
-        r"\tan": "tan",
-        r"\cot": "cot",
-        r"\sec": "sec",
-        r"\csc": "csc",
-        r"\log": "log",
-        r"\ln": "log",
-        r"\exp": "exp",
-        r"\abs": "abs",
-    }
-
-    # 7a. Function^power notation: \sin**{2}x → sin(x)**(2), \sin**2x → sin(x)**2
-    #     By this point, ^{n} is already **(n) and ^n is already **n (step 6).
-    for tex, py in fn_map.items():
-        esc = re.escape(tex)
-        # \sin**(n){x} or \sin**(n) x  → sin(x)**(n)
-        s = re.sub(
-            esc + r"\*\*\(([^()]*)\)\{([^{}]*)\}",
-            py + r"(\2)**(\1)",
-            s,
-        )
-        s = re.sub(
-            esc + r"\*\*\(([^()]*)\)\s*([a-zA-Z0-9])",
-            py + r"(\2)**(\1)",
-            s,
-        )
-        # \sin**2x → sin(x)**2  (bare single-char/digit exponent)
-        s = re.sub(
-            esc + r"\*\*([0-9]+)\s*([a-zA-Z0-9])",
-            py + r"(\2)**\1",
-            s,
-        )
-
-    # 7b. Standard function processing
-    for tex, py in fn_map.items():
-        # \sin{...} → sin(...)
-        s = re.sub(re.escape(tex) + r"\{([^{}]*)\}", py + r"(\1)", s)
-        # \sin(...) → sin(...)
-        s = re.sub(re.escape(tex) + r"\(", py + "(", s)
-        # \sin\pi, \sin\alpha → sin(\pi), sin(\alpha) (function + LaTeX command)
-        s = re.sub(re.escape(tex) + r"\s*(\\[a-zA-Z]+)", py + r"(\1)", s)
-        # \sin x or \sinx → sin(x) (allow optional space — MathLive may omit it)
-        s = re.sub(re.escape(tex) + r"\s*([a-zA-Z0-9])", py + r"(\1)", s)
-        # bare \sin → sin
-        s = s.replace(tex, py)
-
-    # 8. Constants — AFTER function processing to avoid \sin\pi → sinpi
-    s = s.replace(r"\infty", "oo")
-    s = s.replace(r"\pi", "pi")
-
-    # 9. Implicit multiplication
-    s = re.sub(r"(\d)(pi|oo|[a-zA-Z])", r"\1*\2", s)
-    s = re.sub(r"\)\s*(\w)", r")*\1", s)
-
-    # 9b. Matrices: \begin{pmatrix}...\end{pmatrix} → matrix([[...]])
-    #     \begin{vmatrix}...\end{vmatrix} → matrix([[...]]).det()
-    #     Must be BEFORE brace cleanup (step 10) which would destroy \begin{...}
-    s = re.sub(
-        r"\\begin\{([pbvBV]?)matrix\}(.+?)\\end\{[pbvBV]?matrix\}",
-        _replace_matrix,
-        s,
-    )
-    # Implicit multiplication between adjacent matrices: )matrix( → )*matrix(
-    s = re.sub(r"\)(matrix|Matrix)\(", r")*\1(", s)
-
-    # 10. Clean braces and whitespace
-    s = s.replace("{", "(").replace("}", ")")
-    s = re.sub(r"\s+", " ", s).strip()
-
-    # Final implicit multiplication
-    s = re.sub(r"(\d)([a-zA-Z(])", r"\1*\2", s)
-    s = re.sub(r"\)\(", ")*(", s)
-    # Variable/digit before KNOWN function call: xsin( → x*sin(, 2cos( → 2*cos(
-    # Split sin/cos/tan out with (?<!arc) lookbehind so arcsin( doesn't become arc*sin(
-    _KFN_NO_SCT = (
-        "integrate|integral|summation|limit|diff|sqrt|"
-        "arcsin|arccos|arctan|sinh|cosh|tanh|"
-        "cot|sec|csc|log|exp|abs"
-    )
-    s = re.sub(r"([a-zA-Z0-9])(" + _KFN_NO_SCT + r")\(", r"\1*\2(", s)
-    # sin/cos/tan: only insert * if NOT preceded by "arc"
-    s = re.sub(r"([a-zA-Z0-9])(?<!arc)((?:sin|cos|tan)\()", r"\1*\2", s)
-    # Single letter before ( when not part of function name: x( → x*(
-    s = re.sub(r"(?<![a-zA-Z])([a-zA-Z])\(", r"\1*(", s)
-
+    s = _normalize_bare_functions(s)
+    s = _strip_display_wrappers(s)
+    s = _convert_derivatives(s)
+    s = _convert_integrals(s)
+    s = _convert_limits(s)
+    s = _convert_sums(s)
+    s = _strip_thin_spaces(s)
+    s = _convert_fractions(s)
+    s = _convert_roots(s)
+    s = _convert_superscripts(s)
+    s = _convert_subscripts(s)
+    s = _convert_functions(s)
+    s = _convert_constants(s)
+    s = _apply_implicit_multiplication(s)
+    s = _convert_matrices(s)
+    s = _cleanup(s)
     return s
 
 
@@ -741,7 +753,7 @@ OPERATIONS = {
 # ── Request processing ───────────────────────────────────────────────────────
 
 
-def process_request(request):
+def process_request(request: dict) -> dict:
     """Process a single JSON request and return a JSON response."""
     if not SAGE_AVAILABLE and not SYMPY_AVAILABLE:
         return {

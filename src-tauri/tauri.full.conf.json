@@ -1,0 +1,9 @@
+{
+  "productName": "SageMath UI Full",
+  "bundle": {
+    "resources": [
+      "sage_bridge.py",
+      "resources/sagemath-bundle.tar.gz"
+    ]
+  }
+}

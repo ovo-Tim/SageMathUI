@@ -37,8 +37,15 @@ __pycache__/
 *.pyo
 .ruff_cache/
 
+# Android signing (keystore secrets)
+src-tauri/gen/android/keystore.properties
+
 # SageMath Android cross-compilation (large binaries)
 sagemath-android/
+
+# SageMath desktop bundle (downloaded Python + SymPy runtime)
+sagemath-desktop-build/
+src-tauri/resources/sagemath-bundle.tar.gz
 
 # Android build assets (bundled Python runtime, generated)
 src-tauri/gen/android/app/src/main/assets/

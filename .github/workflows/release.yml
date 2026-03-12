@@ -15,18 +15,45 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # ── Lite builds (no bundled SageMath) ──────────────────────
           - platform: macos-latest
             args: --target aarch64-apple-darwin
             rust_targets: aarch64-apple-darwin
+            variant: lite
           - platform: macos-latest
             args: --target x86_64-apple-darwin
             rust_targets: x86_64-apple-darwin
+            variant: lite
           - platform: ubuntu-22.04
             args: ""
             rust_targets: ""
+            variant: lite
           - platform: windows-latest
             args: ""
             rust_targets: ""
+            variant: lite
+
+          # ── Full builds (bundled Python + SymPy) ───────────────────
+          - platform: macos-latest
+            args: --target aarch64-apple-darwin
+            rust_targets: aarch64-apple-darwin
+            variant: full
+            python_triple: aarch64-apple-darwin
+          - platform: macos-latest
+            args: --target x86_64-apple-darwin
+            rust_targets: x86_64-apple-darwin
+            variant: full
+            python_triple: x86_64-apple-darwin
+          - platform: ubuntu-22.04
+            args: ""
+            rust_targets: ""
+            variant: full
+            python_triple: x86_64-unknown-linux-gnu
+          - platform: windows-latest
+            args: ""
+            rust_targets: ""
+            variant: full
+            python_triple: x86_64-pc-windows-msvc
 
     runs-on: ${{ matrix.platform }}
 
@@ -62,6 +89,21 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri -> target"
+          key: ${{ matrix.variant }}
+
+      - name: Cache SageMath desktop bundle
+        if: matrix.variant == 'full'
+        id: sagemath-cache
+        uses: actions/cache@v4
+        with:
+          path: src-tauri/resources/sagemath-bundle.tar.gz
+          key: sagemath-desktop-${{ matrix.python_triple }}-${{ hashFiles('scripts/desktop-sagemath/bundle.sh') }}
+
+      - name: Build SageMath desktop bundle
+        if: matrix.variant == 'full' && steps.sagemath-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: ./scripts/desktop-sagemath/bundle.sh ${{ matrix.python_triple }}
+        timeout-minutes: 15
 
       - name: Install frontend dependencies
         run: pnpm install
@@ -76,10 +118,14 @@ jobs:
           releaseBody: "See the assets for download links."
           releaseDraft: true
           prerelease: false
-          args: ${{ matrix.args }}
+          args: ${{ matrix.args }} --config src-tauri/tauri.${{ matrix.variant }}.conf.json
 
   android:
     runs-on: ubuntu-22.04
+    env:
+      ANDROID_KEY_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
     steps:
       - name: Checkout
@@ -155,6 +201,17 @@ jobs:
           mkdir -p "$ASSETS"
           cp sagemath-android/sagemath-bundle.tar.gz "$ASSETS/"
           cp src-tauri/sage_bridge.py "$ASSETS/"
+
+      - name: Setup Android signing
+        if: env.ANDROID_KEY_BASE64 != ''
+        run: |
+          echo "$ANDROID_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/keystore.jks"
+          cat > src-tauri/gen/android/keystore.properties << EOF
+          storeFile=$RUNNER_TEMP/keystore.jks
+          storePassword=$ANDROID_KEY_PASSWORD
+          keyAlias=$ANDROID_KEY_ALIAS
+          keyPassword=$ANDROID_KEY_PASSWORD
+          EOF
 
       - name: Build Android APK
         run: pnpm tauri android build --target aarch64

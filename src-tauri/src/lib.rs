@@ -18,9 +18,9 @@ pub struct SolverState {
 
 impl SolverState {
     #[cfg(not(target_os = "android"))]
-    pub fn new() -> Self {
+    pub fn new(resource_dir: Option<std::path::PathBuf>, app_data_dir: Option<std::path::PathBuf>) -> Self {
         Self {
-            solver: Arc::new(Mutex::new(LocalSageSolver::new(None))),
+            solver: Arc::new(Mutex::new(LocalSageSolver::new(None, resource_dir, app_data_dir))),
         }
     }
 
@@ -92,7 +92,9 @@ pub fn run() {
         .setup(|app| {
             #[cfg(not(target_os = "android"))]
             {
-                app.manage(SolverState::new());
+                let resource_dir = app.path().resource_dir().ok();
+                let app_data_dir = app.path().app_data_dir().ok();
+                app.manage(SolverState::new(resource_dir, app_data_dir));
             }
             #[cfg(target_os = "android")]
             {
