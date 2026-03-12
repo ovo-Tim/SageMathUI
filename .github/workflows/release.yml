@@ -208,9 +208,6 @@ jobs:
 
           mkdir -p cross-build && cd cross-build
 
-          # Disable C extension modules that need system libraries not in NDK
-          printf '%s\n' '*disabled*' _lzma _bz2 _ssl _hashlib readline _curses _curses_panel _sqlite3 _uuid _ctypes _posixshmem _blake2 > ../Modules/Setup.local
-
           ../configure \
             --host=aarch64-linux-android24 \
             --build=x86_64-linux-gnu \
@@ -224,6 +221,11 @@ jobs:
             ac_cv_file__dev_ptmx=yes \
             ac_cv_file__dev_ptc=no \
             -q
+
+          # Disable C extension modules that need system libraries not in NDK
+          # Must be written AFTER configure so Modules/ dir exists in build tree
+          printf '%s\n' '*disabled*' _lzma _bz2 _ssl _hashlib readline _curses _curses_panel _sqlite3 _uuid _ctypes _posixshmem _blake2 > Modules/Setup.local
+
           make -j"$(nproc)" -s 2>&1 || {
             echo "=== Cross-build failed ==="
             make -j1 2>&1 | tail -50
