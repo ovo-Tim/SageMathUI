@@ -178,7 +178,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: android-python-prefix
-          key: android-python-3.13.3-aarch64-ndk27-${{ hashFiles('scripts/bundle-android-python.sh') }}
+          key: android-python-3.13.3-aarch64-ndk27-v2-${{ hashFiles('scripts/bundle-android-python.sh') }}
 
       - name: Cross-compile Python 3.13 for Android
         if: steps.android-python-cache.outputs.cache-hit != 'true'
@@ -204,9 +204,19 @@ jobs:
           export AR=$TOOLCHAIN/bin/llvm-ar
           export STRIP=$TOOLCHAIN/bin/llvm-strip
           export READELF=$TOOLCHAIN/bin/llvm-readelf
-          export CFLAGS="-O2 -fPIC"
 
           mkdir -p cross-build && cd cross-build
+
+          # Download prebuilt libffi for Android (needed for _ctypes, used by SymPy)
+          LIBFFI_URL="https://github.com/beeware/cpython-android-source-deps/releases/download"
+          mkdir -p prefix
+          curl -sL "$LIBFFI_URL/libffi-3.4.4-3/libffi-3.4.4-3-aarch64-linux-android.tar.gz" | tar xz -C prefix
+
+          PREFIX_DIR="$(pwd)/prefix"
+          export CFLAGS="-O2 -fPIC -I$PREFIX_DIR/include"
+          export LDFLAGS="-L$PREFIX_DIR/lib"
+          export PKG_CONFIG="pkg-config --define-prefix"
+          export PKG_CONFIG_LIBDIR="$PREFIX_DIR/lib/pkgconfig"
 
           ../configure \
             --host=aarch64-linux-android24 \
@@ -216,15 +226,15 @@ jobs:
             --without-ensurepip \
             --without-doc-strings \
             --disable-test-modules \
-            --prefix="$(pwd)/prefix" \
+            --prefix="$PREFIX_DIR" \
             ac_cv_buggy_getaddrinfo=no \
             ac_cv_file__dev_ptmx=yes \
             ac_cv_file__dev_ptc=no \
             -q
 
           # Disable C extension modules that need system libraries not in NDK
-          # Must be written AFTER configure so Modules/ dir exists in build tree
-          printf '%s\n' '*disabled*' _lzma _bz2 _ssl _hashlib readline _curses _curses_panel _sqlite3 _uuid _ctypes _posixshmem _blake2 > Modules/Setup.local
+          # _ctypes is NOT disabled — libffi is provided above via BeeWare prebuilts
+          printf '%s\n' '*disabled*' _lzma _bz2 _ssl _hashlib readline _curses _curses_panel _sqlite3 _uuid _posixshmem _blake2 > Modules/Setup.local
 
           make -j"$(nproc)" -s 2>&1 || {
             echo "=== Cross-build failed ==="
